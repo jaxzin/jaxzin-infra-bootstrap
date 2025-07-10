@@ -38,15 +38,15 @@ jobs:
           key: ${{secrets.SSH_KEY}}
           # Optional, literal inventory file contents
           inventory: |
-            [all]
-            ${{ secrets.NAS_HOST }}
+            [nas]
+            ${{ secrets.NAS_HOST }} ansible_user=${{ NAS_SSH_USER }}
           # Optional, SSH known hosts file content
 #            known_hosts: |
 #              example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
           # Optional, encrypted vault password
 #            vault_password: ${{secrets.VAULT_PASSWORD}}
           # Optional, galaxy requirements filepath
-#            requirements: galaxy-requirements.yml
+          requirements: galaxy-requirements.yml
           # Optional, additional flags to pass to ansible-playbook
           options: |
 #              --inventory .hosts

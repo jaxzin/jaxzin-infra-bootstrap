@@ -29,14 +29,12 @@
     b2_secret_key: "{{ lookup('env','B2_SECRET_KEY') }}"
     # SSL/TLS certificate management
     dsm_cert_name: nas-lan
-  tasks:
-    - name: Ensure Docker (Container Manager) package is installed
-      # DSM 7.x UI calls it 'Container Manager', but the package is 'docker'
-      syno_pacman:
-        name: docker
-        state: present
+  roles:
+    - role: tafeen.synology.syno_pkg_install
+      syno_pkg_name: "Container Manager"
+      syno_pkg_state: present
       tags: docker
-
+  tasks:
     - name: Create data directories for Gitea
       # Prepare persistent directories for both Gitea and MySQL
       file:
