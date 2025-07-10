@@ -1,0 +1,43 @@
+name: Mirror Health Check
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # daily
+
+jobs:
+  check-mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Fail if mirror stale (>24 h)
+        run: |
+          last=$(git show -s --format=%ct HEAD)
+          now=$(date +%s)
+          delta=$(( (now - last) / 3600 ))
+          if [ $delta -gt 24 ]; then
+            echo "Mirror stale: $delta hours since last commit"
+            exit 1
+          else
+            echo "Mirror healthy: $delta hours since last commit"
+          fi
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            { "text": ":rotating_light: Mirror has not updated in over 24 hours!" }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify Discord on failure
+        if: failure()
+        uses: Ilshidur/action-discord@0.3.2
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        with:
+          args: ":rotating_light: Mirror has not updated in over 24 hours!"

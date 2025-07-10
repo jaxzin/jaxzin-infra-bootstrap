@@ -1,0 +1,11 @@
+name: Deploy on Gitea
+
+on:
+  workflow_dispatch:   # trigger on every push or manual dispatch
+
+jobs:
+  call-bootstrap:
+    uses: ./.github/workflows/common-bootstrap.yml
+    with:
+      dry_run: false    # always deploy when run via Gitea
+      restore: false    # ...but never do a restore of Gitea data from Gitea (this is never the disaster recovery path)

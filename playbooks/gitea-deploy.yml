@@ -1,0 +1,153 @@
+# playbooks/gitea-deploy.yml
+---
+# Ansible playbook to deploy or restore Gitea on my Synology NAS
+# - Installs Container Manager (Docker)
+# - Deploys MySQL and Gitea containers
+# - Plans & gates destructive restore (fail on overlap)
+# - Optionally restores from Backblaze B2 backup
+# - Syncs SSL certificate
+# - Restarts Gitea
+
+- name: Deploy or Restore Gitea on Synology NAS
+  hosts: nas
+  become: true
+  vars:
+    # Domain and data paths
+    gitea_domain: "nas.lan.jaxzin.com"
+    gitea_data_path: "/volume1/docker/gitea"
+    # Docker images
+    gitea_image_tag: "1.24.2-rootless"
+    gitea_image: "gitea/gitea:{{ gitea_image_tag }}"
+    gitea_db_image: "mysql:8"
+    # Database credentials (from environment)
+    gitea_db_name: "gitea"
+    gitea_db_user: "gitea"
+    gitea_db_password: "{{ lookup('env','GITEA_DB_PASSWORD') }}"
+    # Backblaze B2 backup settings
+    b2_bucket: "{{ lookup('env','B2_ACCESS_KEY') || 'jaxzin-gitea-backups' }}"
+    b2_access_key: "{{ lookup('env','B2_ACCESS_KEY') }}"
+    b2_secret_key: "{{ lookup('env','B2_SECRET_KEY') }}"
+    # SSL/TLS certificate management
+    dsm_cert_name: nas-lan
+  tasks:
+    - name: Ensure Docker (Container Manager) package is installed
+      # DSM 7.x UI calls it 'Container Manager', but the package is 'docker'
+      syno_pacman:
+        name: docker
+        state: present
+      tags: docker
+
+    - name: Create data directories for Gitea
+      # Prepare persistent directories for both Gitea and MySQL
+      file:
+        path: "{{ gitea_data_path }}/{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - gitea
+        - db
+      tags: directories
+
+    - name: Deploy MySQL container for Gitea
+      # Launch a MySQL container for the Gitea database
+      community.docker.docker_container:
+        name: gitea-db
+        image: "{{ gitea_db_image }}"
+        state: started
+        restart_policy: always
+        env:
+          MYSQL_ROOT_PASSWORD: "{{ gitea_db_password }}"
+          MYSQL_DATABASE: "{{ gitea_db_name }}"
+          MYSQL_USER: "{{ gitea_db_user }}"
+          MYSQL_PASSWORD: "{{ gitea_db_password }}"
+        volumes:
+          - "{{ gitea_data_path }}/db:/var/lib/mysql"
+      tags: db
+
+    - name: Deploy Gitea container
+      # Launch the Gitea application container
+      community.docker.docker_container:
+        name: gitea
+        image: "{{ gitea_image }}"
+        state: started
+        restart_policy: always
+        env:
+          USER_UID: 1000
+          USER_GID: 1000
+          GITEA__database__DB_TYPE: "mysql"
+          GITEA__database__HOST: "127.0.0.1:3306"
+          GITEA__database__NAME: "{{ gitea_db_name }}"
+          GITEA__database__USER: "{{ gitea_db_user }}"
+          GITEA__database__PASSWD: "{{ gitea_db_password }}"
+          GITEA__server__DOMAIN: "{{ gitea_domain }}"
+          GITEA__server__ROOT_URL: "https://{{ gitea_domain }}/"
+        ports:
+          - "3000:3000"
+          - "22:22"
+        volumes:
+          - "{{ gitea_data_path }}/gitea:/data"
+      tags: gitea
+
+    - block:
+        - name: Download backup tarball for planning
+          community.general.b2_bucket:
+            state: download
+            bucket: "{{ b2_bucket }}"
+            object: "latest-gitea-backup.tar.gz"
+            dest: "/tmp/gitea-backup.tar.gz"
+
+        - name: Detect overlaps
+          shell: |
+            tar -tf /tmp/gitea-backup.tar.gz | while read f; do
+              if [ -e "{{ gitea_data_path }}/$f" ]; then
+                echo "$f"
+              fi
+            done
+          args:
+            executable: /bin/bash
+          register: overlaps
+          changed_when: false
+
+        - name: Abort on overlaps
+          fail:
+            msg: |
+              Destructive restore would overwrite these files:
+              {{ overlaps.stdout_lines | join('\n  - ') }}
+      when: restore | default(false)
+      tags: plan-restore
+
+    - name: Restore latest backup from Backblaze
+      when:
+        - restore | default(false)
+        - not ansible_check_mode
+      block:
+        - name: Download backup archive
+          community.general.b2_bucket:
+            state: download
+            bucket: "{{ b2_bucket }}"
+            object: "latest-gitea-backup.tar.gz"
+            dest: "/tmp/gitea-backup.tar.gz"
+
+        - name: Extract backup
+          unarchive:
+            src: "/tmp/gitea-backup.tar.gz"
+            dest: "{{ gitea_data_path }}"
+            remote_src: yes
+      tags: restore
+
+    - name: Sync SSL certificate into Gitea config
+      # Copy the DSM-managed SSL cert into Gitea’s HTTPS config
+      copy:
+        src: "/usr/syno/etc/certificate/{{ dsm_cert_name }}/fullchain.pem"
+        dest: "{{ gitea_data_path }}/gitea/conf/https/fullchain.pem"
+        remote_src: yes
+      tags: certs
+
+    - name: Restart Gitea container
+      # Restart to pick up new data, configs, or certificates
+      community.docker.docker_container:
+        name: gitea
+        state: restarted
+      tags: restart

@@ -1,0 +1,57 @@
+# .github/workflows/bootstrap.yml
+name: Bootstrap & Disaster-Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      recover:
+        description: 'Set to true to perform a destructive restore'
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  plan:
+    name: 1) Plan restore
+    runs-on: ubuntu-latest
+    outputs:
+      restore_needed: ${{ steps.plan.outcome == 'failure' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Plan destructive restore (no side-effects)
+        id: plan
+        continue-on-error: true
+        run: |
+          ansible-playbook playbooks/gitea-deploy.yml \
+            -i "${{ secrets.NAS_SSH_HOST }}," \
+            --tags plan-restore \
+            --extra-vars "restore=${{ inputs.recover }}"
+
+      - name: Show plan result
+        if: needs.plan.outputs.restore_needed == 'true'
+        run: echo "⚠️ Overlaps detected; manual approval required."
+
+  approve:
+    name: 2) Await manual approval
+    needs: plan
+    if: ${{ needs.plan.outputs.restore_needed == 'true' && inputs.recover == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production-restore
+    steps:
+      - run: echo "Waiting for approval to proceed with restore…"
+
+  restore:
+    name: 3) Execute restore
+    needs: [plan, approve]
+    if: ${{ inputs.recover == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Execute destructive restore
+        run: |
+          ansible-playbook playbooks/gitea-deploy.yml \
+            -i "${{ secrets.NAS_SSH_HOST }}," \
+            --skip-tags plan-restore \
+            --extra-vars "restore=true"

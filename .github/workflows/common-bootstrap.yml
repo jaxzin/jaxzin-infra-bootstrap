@@ -1,0 +1,37 @@
+# .github/workflows/common-bootstrap.yml
+on:
+  workflow_call:
+    inputs:
+      dry_run:
+        description: "If true, run Ansible in --check mode"
+        required: true
+        type: boolean
+      restore:
+        description: "If true, fetch & extract the Backblaze backup"
+        required: true
+        type: boolean
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout IaC
+        uses: actions/checkout@v3
+
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Bootstrap Gitea on NAS
+        shell: bash
+        run: |
+          EXTRA=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            EXTRA="--check --diff"
+          fi
+          ansible-playbook playbooks/gitea-deploy.yml \
+            -i "${{ secrets.NAS_HOST }}," \
+            $EXTRA \
+            --extra-vars "restore=${{ inputs.restore }}"
