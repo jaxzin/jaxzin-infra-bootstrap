@@ -24,7 +24,7 @@ jobs:
         continue-on-error: true
         run: |
           ansible-playbook playbooks/gitea-deploy.yml \
-            -i "${{ secrets.NAS_HOST }}" \
+            -i "${{ secrets.NAS_HOST }}," \
             --tags plan-restore \
             --extra-vars "restore=${{ inputs.recover }}"
 
@@ -52,6 +52,6 @@ jobs:
       - name: Execute destructive restore
         run: |
           ansible-playbook playbooks/gitea-deploy.yml \
-            -i "${{ secrets.NAS_HOST }}" \
+            -i "${{ secrets.NAS_HOST }}," \
             --skip-tags plan-restore \
             --extra-vars "restore=true"
