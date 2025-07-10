@@ -30,6 +30,7 @@ jobs:
           inventory: |
             [nas]
             ${{ secrets.NAS_SSH_USER }}@${{ secrets.NAS_SSH_HOST }}
+          requirements: galaxy-requirements.yml
           options: |
             --tags plan-restore
             --extra-vars "restore=${{ inputs.recover }}"
