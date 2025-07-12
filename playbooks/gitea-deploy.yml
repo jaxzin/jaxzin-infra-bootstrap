@@ -90,11 +90,12 @@
 
     - block:
         - name: Download backup tarball for planning
-          community.general.b2_bucket:
-            state: download
-            bucket: "{{ b2_bucket }}"
-            object: "latest-gitea-backup.tar.gz"
-            dest: "/tmp/gitea-backup.tar.gz"
+          community.general.b2_file_download:
+            b2_account_id: "{{ b2_access_key }}"
+            b2_account_key: "{{ b2_secret_key }}"
+            bucket_name: "{{ b2_bucket }}"
+            file_name: "latest-gitea-backup.tar.gz"
+            download_path: "/tmp/gitea-backup.tar.gz"
 
         - name: Detect overlaps
           shell: |
@@ -122,11 +123,12 @@
         - not ansible_check_mode
       block:
         - name: Download backup archive
-          community.general.b2_bucket:
-            state: download
-            bucket: "{{ b2_bucket }}"
-            object: "latest-gitea-backup.tar.gz"
-            dest: "/tmp/gitea-backup.tar.gz"
+          community.general.b2_file_download:
+            b2_account_id: "{{ b2_access_key }}"
+            b2_account_key: "{{ b2_secret_key }}"
+            bucket_name: "{{ b2_bucket }}"
+            file_name: "latest-gitea-backup.tar.gz"
+            download_path: "/tmp/gitea-backup.tar.gz"
 
         - name: Extract backup
           unarchive:
