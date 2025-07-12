@@ -29,7 +29,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           inventory: |
             [nas]
-            ${{ secrets.NAS_SSH_USER }}@${{ secrets.NAS_HOST }}
+            ${{ secrets.NAS_SSH_USER }}@${{ vars.NAS_HOST }}
           requirements: galaxy-requirements.yml
           options: |
             --tags plan-restore
@@ -64,7 +64,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           inventory: |
             [nas]
-            ${{ secrets.NAS_SSH_USER }}@${{ secrets.NAS_HOST }}
+            ${{ secrets.NAS_SSH_USER }}@${{ vars.NAS_HOST }}
           requirements: galaxy-requirements.yml
           options: |
             --skip-tags plan-restore
