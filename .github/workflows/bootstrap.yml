@@ -13,7 +13,7 @@ on:
 jobs:
   plan:
     name: 1) Plan restore
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       restore_needed: ${{ steps.plan.outcome == 'failure' }}
     steps:
@@ -43,7 +43,7 @@ jobs:
     name: 2) Await manual approval
     needs: plan
     if: ${{ needs.plan.outputs.restore_needed == 'true' && inputs.recover == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     environment: production-restore
     steps:
       - run: echo "Waiting for approval to proceed with restore…"
@@ -52,7 +52,7 @@ jobs:
     name: 3) Execute restore
     needs: [plan, approve]
     if: ${{ inputs.recover == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v3
 
