@@ -2,3 +2,5 @@
 collections:
   - name: tafeen.synology
     version: "1.0.1"
+  - name: community.general
+    version: "11.0.0"
