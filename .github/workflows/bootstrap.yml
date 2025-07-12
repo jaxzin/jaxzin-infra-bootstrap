@@ -19,11 +19,16 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up Ansible in a venv
+      - name: Set up Ansible in a venv if needed
         run: |
-          python3 -m venv .venv
-          .venv/bin/pip install ansible
-          echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
+          if ! (command -v ansible-playbook &> /dev/null && command -v ansible-galaxy &> /dev/null); then
+            echo "Ansible not found, installing into a virtual environment..."
+            python3 -m venv .venv
+            .venv/bin/pip install ansible
+            echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
+          else
+            echo "Ansible is already available on the PATH."
+          fi
 
       - name: Plan destructive restore (no side-effects)
         id: plan
@@ -62,11 +67,16 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up Ansible in a venv
+      - name: Set up Ansible in a venv if needed
         run: |
-          python3 -m venv .venv
-          .venv/bin/pip install ansible
-          echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
+          if ! (command -v ansible-playbook &> /dev/null && command -v ansible-galaxy &> /dev/null); then
+            echo "Ansible not found, installing into a virtual environment..."
+            python3 -m venv .venv
+            .venv/bin/pip install ansible
+            echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
+          else
+            echo "Ansible is already available on the PATH."
+          fi
 
       - name: Execute destructive restore
         uses: dawidd6/action-ansible-playbook@v4
