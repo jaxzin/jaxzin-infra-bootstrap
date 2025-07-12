@@ -80,3 +80,5 @@ fabric.properties
 ### Ansible template
 *.retry
 
+# Github Actions Secrets for testing (with `act`)
+.secrets
