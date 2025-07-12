@@ -89,13 +89,22 @@
       tags: gitea
 
     - block:
+        - name: Ensure B2 CLI is installed
+          pip:
+            name: b2
+            state: present
+
         - name: Download backup tarball for planning
-          community.general.b2_file_download:
-            b2_account_id: "{{ b2_access_key }}"
-            b2_account_key: "{{ b2_secret_key }}"
-            bucket_name: "{{ b2_bucket }}"
-            file_name: "latest-gitea-backup.tar.gz"
-            download_path: "/tmp/gitea-backup.tar.gz"
+          command: >
+            b2 download-file-by-name
+            "{{ b2_bucket }}"
+            "latest-gitea-backup.tar.gz"
+            "/tmp/gitea-backup.tar.gz"
+          environment:
+            B2_APPLICATION_KEY_ID: "{{ b2_access_key }}"
+            B2_APPLICATION_KEY: "{{ b2_secret_key }}"
+          args:
+            creates: "/tmp/gitea-backup.tar.gz"
 
         - name: Detect overlaps
           shell: |
@@ -122,13 +131,22 @@
         - restore | default(false)
         - not ansible_check_mode
       block:
+        - name: Ensure B2 CLI is installed
+          pip:
+            name: b2
+            state: present
+
         - name: Download backup archive
-          community.general.b2_file_download:
-            b2_account_id: "{{ b2_access_key }}"
-            b2_account_key: "{{ b2_secret_key }}"
-            bucket_name: "{{ b2_bucket }}"
-            file_name: "latest-gitea-backup.tar.gz"
-            download_path: "/tmp/gitea-backup.tar.gz"
+          command: >
+            b2 download-file-by-name
+            "{{ b2_bucket }}"
+            "latest-gitea-backup.tar.gz"
+            "/tmp/gitea-backup.tar.gz"
+          environment:
+            B2_APPLICATION_KEY_ID: "{{ b2_access_key }}"
+            B2_APPLICATION_KEY: "{{ b2_secret_key }}"
+          args:
+            creates: "/tmp/gitea-backup.tar.gz"
 
         - name: Extract backup
           unarchive:
