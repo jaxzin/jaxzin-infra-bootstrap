@@ -27,7 +27,7 @@ jobs:
 
       - name: Notify Slack on failure
         if: failure()
-        uses: slackapi/slack-github-action@v1
+        uses: slackapi/slack-github-action@v2
         with:
           payload: |
             { "text": ":rotating_light: Mirror has not updated in over 24 hours!" }
