@@ -101,20 +101,23 @@ SSH_KEY=<your_private_ssh_key>
 B2_ACCESS_KEY=<your_b2_access_key>
 B2_SECRET_KEY=<your_b2_secret_key>
 DISCORD_WEBHOOK_URL=<your_discord_webhook>
+GITEA_DB_PASSWORD=<your_gitea_db_password>
+DNSIMPLE_OAUTH_TOKEN=<your_dnsimple_oauth_token>
 ```
 
 **`.vars`** (for non-secret configuration):
 ```
 NAS_HOST=<your_nas_host>
 NAS_SSH_USER=<your_ssh_user>
+CERTBOT_EMAIL=<your_certbot_email>
 ```
 
 **Important:** These files should not be committed to the repository. The `.gitignore` file is already configured to ignore them.
 
-Once you've created these files, you can run the `bootstrap.yml` workflow locally with the following command:
+Once you've created these files, you can run the `bootstrap.yml` workflow locally using the `Makefile`:
 
 ```bash
-act -W .github/workflows/bootstrap.yml --secret-file .secrets --var-file .vars --input recover=false --container-architecture linux/amd64 -P self-hosted=ghcr.io/jaxzin/jaxzin-infra-runner:latest
+make act-test
 ```
 
 This command will execute the workflow in a Docker container that mirrors the `ubuntu-latest` environment used by GitHub Actions.

@@ -1,0 +1,87 @@
+#!/bin/bash
+set -e
+source {{ certbot_data_path }}/dnsimple_env.sh
+
+CERT_DIR="{{ certbot_data_path }}/certs"
+LIVE_DIR="${CERT_DIR}/live/{{ gitea_domain }}"
+FULLCHAIN_PATH="${LIVE_DIR}/fullchain.pem"
+PRIVKEY_PATH="${LIVE_DIR}/privkey.pem"
+
+# --- Notification Function ---
+send_notification() {
+  local subject="$1"
+  local message="$2"
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [Certbot] ${subject}: ${message}"
+  # Use Synology's native notification system
+  /usr/syno/bin/synoservicectl --notify "${subject}" "${message}"
+  # If you prefer Discord, uncomment and configure the following:
+  # if [ -n "{{ lookup('env','DISCORD_WEBHOOK_URL') }}" ]; then
+  #   curl -H "Content-Type: application/json" -X POST -d "{\"username\": \"Certbot Alert\", \"content\": \"${subject}: ${message}\"}" "{{ lookup('env','DISCORD_WEBHOOK_URL') }}"
+  # fi
+}
+
+# --- Error Trap ---
+trap 'send_notification "Certbot Renewal Failed" "Script exited with an error. Check logs for details."' ERR
+
+# --- Main Logic ---
+
+# Function to run Certbot command
+run_certbot() {
+  /usr/local/bin/docker run --rm \
+     -e DNSIMPLE_API_TOKEN="${DNSIMPLE_API_TOKEN}" \
+     -e DNSIMPLE_ENDPOINT="${DNSIMPLE_ENDPOINT}" \
+     -v "${CERT_DIR}:/etc/letsencrypt" \
+     certbot/dns-dnsimple "$@"
+}
+
+# 1. Initial certificate acquisition if not present
+if [ ! -d "${LIVE_DIR}" ]; then
+  echo "No certificate found for {{ gitea_domain }}. Attempting initial acquisition..."
+  run_certbot certonly \
+    --dns-dnsimple \
+    --dns-dnsimple-credentials /etc/letsencrypt/dnsimple.ini \
+    -d "{{ gitea_domain }}" \
+    --email "{{ certbot_email }}" \
+    --agree-tos \
+    --no-eff-email \
+    --server https://acme-v02.api.letsencrypt.org/directory
+  echo "Initial certificate acquisition attempt completed."
+fi
+
+# 2. Attempt certificate renewal
+# Get the modification time of the fullchain.pem before renewal attempt
+LAST_MOD_TIME=$(stat -c %Y "${FULLCHAIN_PATH}" 2>/dev/null || echo 0)
+
+echo "Attempting certificate renewal for {{ gitea_domain }}..."
+run_certbot renew
+
+# Get the modification time after renewal attempt
+NEW_MOD_TIME=$(stat -c %Y "${FULLCHAIN_PATH}" 2>/dev/null || echo 0)
+
+# 3. Import to DSM and restart services if certificate was renewed
+if [ "${NEW_MOD_TIME}" -gt "${LAST_MOD_TIME}" ]; then
+  echo "Certificate for {{ gitea_domain }} was renewed. Importing to DSM..."
+  /usr/syno/sbin/syno-letsencrypt import \
+    -c "${FULLCHAIN_PATH}" \
+    -k "${PRIVKEY_PATH}" \
+    -d "{{ dsm_cert_name }}"
+
+  echo "Restarting Nginx on DSM..."
+  /usr/syno/sbin/synoservicecfg --restart nginx
+  send_notification "Certbot Renewal Success" "Certificate for {{ gitea_domain }} was successfully renewed and imported into DSM."
+else
+  echo "Certificate for {{ gitea_domain }} was not renewed (still valid)."
+fi
+
+# 4. Check certificate expiry and send warning if close to expiration
+if [ -f "${FULLCHAIN_PATH}" ]; then
+  EXPIRY_DATE_UNIX=$(openssl x509 -in "${FULLCHAIN_PATH}" -enddate -noout | sed -n 's/notAfter=//p' | xargs -I {} date -d {} +%s)
+  CURRENT_DATE_UNIX=$(date +%s)
+  DAYS_TO_EXPIRY=$(( (EXPIRY_DATE_UNIX - CURRENT_DATE_UNIX) / 86400 ))
+
+  if [ "${DAYS_TO_EXPIRY}" -lt 7 ]; then # Alert if less than 7 days to expiry
+    if [ "${NEW_MOD_TIME}" -eq "${LAST_MOD_TIME}" ]; then # Only warn if it wasn't just renewed
+      send_notification "Certbot Warning: Certificate Expiring Soon" "Certificate for {{ gitea_domain }} expires in ${DAYS_TO_EXPIRY} days and was NOT renewed. Manual intervention may be required."
+    fi
+  fi
+fi
