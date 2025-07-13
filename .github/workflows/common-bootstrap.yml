@@ -16,7 +16,7 @@ jobs:
     runs-on: self-hosted
     steps:
       - name: Checkout IaC
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configure SSH key
         run: |

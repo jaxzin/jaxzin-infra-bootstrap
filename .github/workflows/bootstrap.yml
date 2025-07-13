@@ -17,7 +17,7 @@ jobs:
     outputs:
       restore_needed: ${{ steps.plan.outcome == 'failure' }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Ansible in a venv if needed
         run: |
@@ -65,7 +65,7 @@ jobs:
     if: ${{ inputs.recover == 'true' }}
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Ansible in a venv if needed
         run: |
