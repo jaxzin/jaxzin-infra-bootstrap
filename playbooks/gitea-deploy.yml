@@ -180,6 +180,7 @@
         owner: "1000"
         group: "1000"
         mode: '0640'
+      notify: Restart Gitea
 
     - name: Deploy Gitea container
       # Launch the Gitea application container
@@ -199,8 +200,9 @@
         volumes:
           - "{{ gitea_data_path }}/gitea:/data"
           - "{{ gitea_data_path }}/conf/app.ini:/etc/gitea/app.ini"
-          - "{{ gitea_data_path }}/certs:/etc/letsencrypt:ro"
+          - "{{ certbot_data_path }}/certs:/etc/letsencrypt:ro"
       tags: gitea
+      notify: Restart Gitea
 
     - block:
         - name: Ensure B2 CLI is installed (plan-restore)
@@ -267,13 +269,12 @@
             src: "/tmp/gitea-backup.tar.gz"
             dest: "{{ gitea_data_path }}"
             remote_src: yes
+          notify: Restart Gitea
       tags: restore
 
-    
-
-    - name: Restart Gitea container
-      # Restart to pick up new data, configs, or certificates
+  handlers:
+    - name: Restart Gitea
       community.docker.docker_container:
         name: gitea
-        state: restarted
-      tags: restart
+        state: started
+        restart: yes
