@@ -1,6 +1,7 @@
 ;; Gitea app.ini configuration, managed by Ansible
 
 [server]
+PROTOCOL         = https
 DOMAIN           = {{ gitea_domain }}
 ROOT_URL         = https://{{ gitea_domain }}:{{ gitea_port }}/
 CERT_FILE        = /etc/letsencrypt/live/{{ gitea_domain }}/fullchain.pem
