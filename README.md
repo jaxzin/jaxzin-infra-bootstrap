@@ -88,6 +88,39 @@ flowchart LR
 
 ---
 
+## Local Development
+
+To test the Ansible playbooks and GitHub Actions workflows locally before committing, you can use `act`. This allows you to run the workflows in an environment that closely mimics the GitHub Actions runners.
+
+First, you'll need to create two files in the root of the project to provide the necessary secrets and variables to `act`.
+
+**`.secrets`** (for sensitive values):
+```
+NAS_SSH_PASSWORD=<your_ssh_password>
+SSH_KEY=<your_private_ssh_key>
+B2_ACCESS_KEY=<your_b2_access_key>
+B2_SECRET_KEY=<your_b2_secret_key>
+DISCORD_WEBHOOK_URL=<your_discord_webhook>
+```
+
+**`.vars`** (for non-secret configuration):
+```
+NAS_HOST=<your_nas_host>
+NAS_SSH_USER=<your_ssh_user>
+```
+
+**Important:** These files should not be committed to the repository. The `.gitignore` file is already configured to ignore them.
+
+Once you've created these files, you can run the `bootstrap.yml` workflow locally with the following command:
+
+```bash
+act -W .github/workflows/bootstrap.yml --secret-file .secrets --var-file .vars --input recover=false --container-architecture linux/amd64 -P self-hosted=ghcr.io/jaxzin/jaxzin-infra-runner:latest
+```
+
+This command will execute the workflow in a Docker container that mirrors the `ubuntu-latest` environment used by GitHub Actions.
+
+---
+
 ## What You Need to Do Once
 
 ### 1. DSM Certificate Import

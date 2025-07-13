@@ -1,0 +1,15 @@
+;; Gitea app.ini configuration, managed by Ansible
+
+[server]
+DOMAIN           = {{ gitea_domain }}
+ROOT_URL         = https://{{ gitea_domain }}:{{ gitea_port }}/
+
+[database]
+DB_TYPE          = mysql
+HOST             = gitea-db:3306
+NAME             = {{ gitea_db_name }}
+USER             = {{ gitea_db_user }}
+PASSWD           = {{ gitea_db_password }}
+
+[security]
+INSTALL_LOCK     = true

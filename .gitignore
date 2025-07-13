@@ -82,3 +82,4 @@ fabric.properties
 
 # Github Actions Secrets for testing (with `act`)
 .secrets
+.vars

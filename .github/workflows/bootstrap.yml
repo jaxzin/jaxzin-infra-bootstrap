@@ -23,8 +23,9 @@ jobs:
         run: |
           if ! (command -v ansible-playbook &> /dev/null && command -v ansible-galaxy &> /dev/null); then
             echo "Ansible not found, installing into a virtual environment..."
+            python3 --version
             python3 -m venv .venv
-            .venv/bin/pip install ansible
+            .venv/bin/pip install ansible==11.7.0
             echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
           else
             echo "Ansible is already available on the PATH."
@@ -43,8 +44,7 @@ jobs:
             ${{ vars.NAS_SSH_USER }}@${{ vars.NAS_HOST }} ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
           requirements: galaxy-requirements.yml
           options: |
-            --tags plan-restore
-            --extra-vars "restore=${{ inputs.recover }}"
+            --extra-vars "restore=${{ inputs.recover }} gitea_db_password=${{ secrets.GITEA_DB_PASSWORD }}"
 
       - name: Show plan result
         if: needs.plan.outputs.restore_needed == 'true'
@@ -90,4 +90,4 @@ jobs:
           requirements: galaxy-requirements.yml
           options: |
             --skip-tags plan-restore
-            --extra-vars "restore=true"
+            --extra-vars "restore=${{ inputs.recover }} gitea_db_password=${{ secrets.GITEA_DB_PASSWORD }}"

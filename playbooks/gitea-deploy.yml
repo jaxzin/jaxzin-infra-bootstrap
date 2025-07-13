@@ -14,6 +14,7 @@
   vars:
     # Domain and data paths
     gitea_domain: "nas.lan.jaxzin.com"
+    gitea_port: "3000"
     gitea_data_path: "/volume1/docker/gitea"
     # Docker images
     gitea_image_tag: "1.24.2-rootless"
@@ -35,6 +36,18 @@
       syno_pkg_state: present
       tags: docker
   tasks:
+    - name: Install Python3
+      include_role:
+        name: tafeen.synology.syno_pkg_install
+      vars:
+        syno_pkg_name: "Python3"
+        syno_pkg_state: present
+
+    - name: Install pip
+      command: python3 -m ensurepip --upgrade
+      args:
+        creates: /usr/bin/pip3
+
     - name: Create data directories for Gitea
       # Prepare persistent directories for both Gitea and MySQL
       file:
@@ -48,6 +61,19 @@
         - db
       tags: directories
 
+    - name: Create conf directory for Gitea
+      file:
+        path: "{{ gitea_data_path }}/conf"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create Gitea Docker network
+      community.docker.docker_network:
+        name: gitea-net
+        state: present
+
     - name: Deploy MySQL container for Gitea
       # Launch a MySQL container for the Gitea database
       community.docker.docker_container:
@@ -55,6 +81,8 @@
         image: "{{ gitea_db_image }}"
         state: started
         restart_policy: always
+        networks:
+          - name: gitea-net
         env:
           MYSQL_ROOT_PASSWORD: "{{ gitea_db_password }}"
           MYSQL_DATABASE: "{{ gitea_db_name }}"
@@ -64,6 +92,14 @@
           - "{{ gitea_data_path }}/db:/var/lib/mysql"
       tags: db
 
+    - name: Configure Gitea app.ini
+      template:
+        src: app.ini.j2
+        dest: "{{ gitea_data_path }}/conf/app.ini"
+        owner: "1000"
+        group: "1000"
+        mode: '0640'
+
     - name: Deploy Gitea container
       # Launch the Gitea application container
       community.docker.docker_container:
@@ -71,25 +107,21 @@
         image: "{{ gitea_image }}"
         state: started
         restart_policy: always
+        networks:
+          - name: gitea-net
         env:
-          USER_UID: 1000
-          USER_GID: 1000
-          GITEA__database__DB_TYPE: "mysql"
-          GITEA__database__HOST: "127.0.0.1:3306"
-          GITEA__database__NAME: "{{ gitea_db_name }}"
-          GITEA__database__USER: "{{ gitea_db_user }}"
-          GITEA__database__PASSWD: "{{ gitea_db_password }}"
-          GITEA__server__DOMAIN: "{{ gitea_domain }}"
-          GITEA__server__ROOT_URL: "https://{{ gitea_domain }}/"
+          USER_UID: "1000"
+          USER_GID: "1000"
         ports:
           - "3000:3000"
-          - "22:22"
+          - "22222:22"
         volumes:
           - "{{ gitea_data_path }}/gitea:/data"
+          - "{{ gitea_data_path }}/conf/app.ini:/etc/gitea/app.ini"
       tags: gitea
 
     - block:
-        - name: Ensure B2 CLI is installed
+        - name: Ensure B2 CLI is installed (plan-restore)
           pip:
             name: b2
             state: present
@@ -123,15 +155,15 @@
             msg: |
               Destructive restore would overwrite these files:
               {{ overlaps.stdout_lines | join('\n  - ') }}
-      when: restore | default(false)
+      when: restore | default(false) | bool
       tags: plan-restore
 
     - name: Restore latest backup from Backblaze
       when:
-        - restore | default(false)
+        - restore | default(false) | bool
         - not ansible_check_mode
       block:
-        - name: Ensure B2 CLI is installed
+        - name: Ensure B2 CLI is installed (restore)
           pip:
             name: b2
             state: present
