@@ -147,10 +147,12 @@
         DNSIMPLE_ENDPOINT: "{{ dnsimple_endpoint }}"
 
     - name: Schedule daily certificate renewal
-      cron:
-        name: "Certbot daily renewal"
+      ansible.builtin.import_role:
+        name: tafeen.synology.syno_crontab
+      vars:
         minute: "0"
         hour: "3"
+        user: "root"
         job: "{{ certbot_data_path }}/scripts/renew-cert.sh > /dev/null 2>&1"
 
     - name: Deploy MySQL container for Gitea
