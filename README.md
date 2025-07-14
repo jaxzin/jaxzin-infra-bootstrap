@@ -147,7 +147,19 @@ In Gitea (Settings → Actions → Variables):
 
 Ensure at least one Gitea runner (Docker) is registered and online.
 
-### 3. GitHub Secrets
+### 3. Gitea Admin User
+
+The initial Gitea administrator user is created automatically by the Ansible playbook. The credentials for this user are sourced from environment variables within your CI/CD system (e.g., Gitea Actions secrets).
+
+You must define the following variables/secrets for the admin user creation to succeed:
+
+| Name | Value/Purpose |
+| --- | --- |
+| `GITEA_ADMIN_USERNAME` | The desired username for the Gitea administrator. |
+| `GITEA_ADMIN_PASSWORD` | The password for the Gitea administrator. |
+| `GITEA_ADMIN_EMAIL` | The email address for the Gitea administrator. |
+
+### 4. GitHub Secrets
 
 In GitHub (Settings → Secrets → Actions):
 
