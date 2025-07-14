@@ -16,6 +16,21 @@ jobs:
     runs-on: self-hosted
     outputs:
       restore_needed: ${{ steps.plan.outcome == 'failure' }}
+    env:
+      B2_BUCKET: ${{ vars.B2_BUCKET }}
+      B2_ACCESS_KEY: ${{ secrets.B2_ACCESS_KEY }}
+      B2_SECRET_KEY: ${{ secrets.B2_SECRET_KEY }}
+      CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
+      DNSIMPLE_OAUTH_TOKEN: ${{ secrets.DNSIMPLE_OAUTH_TOKEN }}
+      GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+      GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+      GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+      GITEA_DB_PASSWORD: ${{ secrets.GITEA_DB_PASSWORD }}
+      GITEA_RESTORE: ${{ inputs.recover }}
+      NAS_HOST: ${{ vars.NAS_HOST }}
+      NAS_SSH_USER: ${{ vars.NAS_SSH_USER }}
+      NAS_SSH_PASSWORD: ${{ secrets.NAS_SSH_PASSWORD }}
+      SSH_KEY: ${{ secrets.SSH_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -38,13 +53,14 @@ jobs:
         with:
           playbook: gitea-deploy.yml
           directory: ./playbooks
+          configuration: |
+            [ssh_connection]
+            ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o ControlPath=/tmp/ansible-ssh-%%h-%%p-%%r
           key: ${{ secrets.SSH_KEY }}
           inventory: |
             [nas]
             ${{ vars.NAS_SSH_USER }}@${{ vars.NAS_HOST }} ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
           requirements: galaxy-requirements.yml
-          options: |
-            --extra-vars "restore=${{ inputs.recover }} gitea_db_password=${{ secrets.GITEA_DB_PASSWORD }} certbot_email=${{ vars.CERTBOT_EMAIL }} dnsimple_oauth_token=${{ secrets.DNSIMPLE_OAUTH_TOKEN }}"
 
       - name: Show plan result
         if: needs.plan.outputs.restore_needed == 'true'
@@ -88,6 +104,10 @@ jobs:
             [nas]
             ${{ vars.NAS_SSH_USER }}@${{ vars.NAS_HOST }} ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
           requirements: galaxy-requirements.yml
-          options: |
+          options: >
             --skip-tags plan-restore
-            --extra-vars "restore=${{ inputs.recover }} gitea_db_password=${{ secrets.GITEA_DB_PASSWORD }} certbot_email=${{ vars.CERTBOT_EMAIL }} DNSIMPLE_API_TOKEN=${{ secrets.DNSIMPLE_API_TOKEN }} DNSIMPLE_ENDPOINT=${{ secrets.DNSIMPLE_ENDPOINT }}"
+            --extra-vars "
+            restore=${{ inputs.recover }} 
+            certbot_email=${{ vars.CERTBOT_EMAIL }} 
+            dnsimple_oauth_token=${{ secrets.DNSIMPLE_OAUTH_TOKEN }}
+            "
