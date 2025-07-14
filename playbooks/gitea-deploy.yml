@@ -12,9 +12,9 @@
   hosts: nas
   become: true
   vars:
-    dnsimple_oauth_token: "{{ dnsimple_oauth_token }}"
-    dnsimple_endpoint: "{{ lookup('env', 'DNSIMPLE_ENDPOINT') | default('https://api.dnsimple.com', true) }}"
-    certbot_email: "{{ certbot_email }}"  # Passed from GitHub Actions
+    dnsimple_oauth_token: "{{ lookup('ansible.builtin.env', 'DNSIMPLE_OAUTH_TOKEN') }}"
+    dnsimple_endpoint: "{{ lookup('ansible.builtin.env', 'DNSIMPLE_ENDPOINT') | default('https://api.dnsimple.com', true) }}"
+    certbot_email: "{{ lookup('ansible.builtin.env', 'CERTBOT_EMAIL') }}"
     certbot_command_args: [
       "certonly",
       "--dns-dnsimple",
@@ -29,6 +29,9 @@
     gitea_port: "8443"
     gitea_data_path: "/volume1/docker/gitea"
     certbot_data_path: "/volume1/docker/certbot"
+    # Gitea configuration paths
+    gitea_app_ini_path_host: "{{ gitea_data_path }}/conf/app.ini"
+    gitea_app_ini_path_container: "/etc/gitea/app.ini"
     # Docker images
     gitea_image_tag: "1.24.2-rootless"
     gitea_image: "gitea/gitea:{{ gitea_image_tag }}"
@@ -36,19 +39,42 @@
     # Database credentials (from environment)
     gitea_db_name: "gitea"
     gitea_db_user: "gitea"
-    gitea_db_password: "{{ lookup('env','GITEA_DB_PASSWORD') }}"
+    gitea_db_password: "{{ lookup('ansible.builtin.env','GITEA_DB_PASSWORD') }}"
+    gitea_admin_username: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_USERNAME') }}"
+    gitea_admin_password: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_PASSWORD') }}"
+    gitea_admin_email: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_EMAIL') }}"
     # Backblaze B2 backup settings
-    b2_bucket: "{{ lookup('env','B2_ACCESS_KEY') || 'jaxzin-gitea-backups' }}"
-    b2_access_key: "{{ lookup('env','B2_ACCESS_KEY') }}"
-    b2_secret_key: "{{ lookup('env','B2_SECRET_KEY') }}"
+    b2_bucket: "{{ lookup('ansible.builtin.env','B2_ACCESS_KEY') }}"
+    b2_access_key: "{{ lookup('ansible.builtin.env','B2_ACCESS_KEY') }}"
+    b2_secret_key: "{{ lookup('ansible.builtin.env','B2_SECRET_KEY') }}"
     # SSL/TLS certificate management
     dsm_cert_name: nas-lan
+    restore: "{{ lookup('ansible.builtin.env', 'GITEA_RESTORE') | bool }}"
   roles:
     - role: tafeen.synology.syno_pkg_install
       syno_pkg_name: "Container Manager"
       syno_pkg_state: present
       tags: docker
   tasks:
+    - name: Validate required variables
+      assert:
+        that:
+          - lookup('vars', item) is defined
+          - lookup('vars', item) | string != ""
+        fail_msg: "The required variable '{{ item }}' is undefined or is empty."
+      loop:
+        - b2_bucket
+        - b2_access_key
+        - b2_secret_key
+        - certbot_email
+        - dnsimple_endpoint
+        - dnsimple_oauth_token
+        - gitea_admin_username
+        - gitea_admin_password
+        - gitea_admin_email
+        - gitea_db_password
+        - restore
+
     - name: Install Python3
       include_role:
         name: tafeen.synology.syno_pkg_install
@@ -176,7 +202,7 @@
     - name: Configure Gitea app.ini
       template:
         src: app.ini.j2
-        dest: "{{ gitea_data_path }}/conf/app.ini"
+        dest: "{{ gitea_app_ini_path_host }}"
         owner: "1000"
         group: "1000"
         mode: '0640'
@@ -199,10 +225,50 @@
           - "22222:22"
         volumes:
           - "{{ gitea_data_path }}/gitea:/data"
-          - "{{ gitea_data_path }}/conf/app.ini:/etc/gitea/app.ini"
+          - "{{ gitea_app_ini_path_host }}:{{ gitea_app_ini_path_container }}"
           - "{{ certbot_data_path }}/certs:/etc/letsencrypt:ro"
       tags: gitea
       notify: Restart Gitea
+
+    - name: Wait for MySQL to be ready (from within Gitea container)
+      community.docker.docker_container_exec:
+        container: gitea
+        command: nc -z gitea-db 3306
+      register: db_check_result
+      until: db_check_result.rc == 0
+      retries: 15          # Try 15 times
+      delay: 5             # Wait 5 seconds between retries (total wait time: 75s)
+      changed_when: false  # This task just checks status, it doesn't make a change
+
+    - name: Check if Gitea admin user exists
+      community.docker.docker_container_exec:
+        container: gitea
+        command: >
+          /bin/sh -c "
+          /app/gitea/gitea admin user list
+          --config {{ gitea_app_ini_path_container }} | grep -q '^{{ gitea_admin_username }}\b'
+          "
+      register: admin_check
+      failed_when: admin_check.rc not in [0, 1] # Only fail on unexpected return codes
+      changed_when: false # This task is just a check, not a change
+
+    - debug:
+        msg: "Admin user '{{ gitea_admin_username }}' already exists: {{ admin_check.rc == 0 }}"
+        verbosity: 1
+
+    - name: Create Gitea admin user inside the container
+      community.docker.docker_container_exec:
+        container: gitea
+        command: >
+          /app/gitea/gitea admin user create
+          --config {{ gitea_app_ini_path_container }}
+          --username '{{ gitea_admin_username }}'
+          --password '{{ gitea_admin_password }}'
+          --email '{{ gitea_admin_email }}'
+          --admin
+      when: admin_check.rc != 0
+      register: admin_create
+      changed_when: admin_create.rc == 0
 
     - block:
         - name: Ensure B2 CLI is installed (plan-restore)
