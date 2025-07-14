@@ -218,3 +218,9 @@ Register at least one self-hosted GitHub runner off the NAS, labeled `dr`.
 * **The most critical IaC** lives on Gitea _and_ GitHub, so hardware failures don’t lose automation.
 
 Happy automating The Jackson Family way! 🚀
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
