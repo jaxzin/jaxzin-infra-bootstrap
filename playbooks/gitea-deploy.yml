@@ -222,7 +222,7 @@
           - "{{ gitea_port }}:3000"
           - "{{ gitea_ssh_port }}:22"
         volumes:
-          - "{{ gitea_data_path }}/gitea:/data"
+          - "{{ gitea_data_path }}/gitea:/var/lib/gitea"
           - "{{ gitea_app_ini_path_host }}:{{ gitea_app_ini_path_container }}"
           - "{{ certbot_data_path }}/certs:/etc/letsencrypt:ro"
       tags: gitea
@@ -233,7 +233,7 @@
         container: gitea
         command: nc -z gitea-db 3306
       register: db_check_result
-      until: db_check_result.rc == 0
+      until: db_check_result.rc is defined and db_check_result.rc == 0
       retries: 15          # Try 15 times
       delay: 5             # Wait 5 seconds between retries (total wait time: 75s)
       changed_when: false  # This task just checks status, it doesn't make a change
