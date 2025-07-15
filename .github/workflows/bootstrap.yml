@@ -1,113 +1,12 @@
-# .github/workflows/bootstrap.yml
-name: Bootstrap & Disaster-Recovery
+name: Bootstrap
 
 on:
   workflow_dispatch:
-    inputs:
-      recover:
-        description: 'Set to true to perform a destructive restore'
-        required: true
-        default: false
-        type: boolean
 
 jobs:
-  plan:
-    name: 1) Plan restore
-    runs-on: self-hosted
-    outputs:
-      restore_needed: ${{ steps.plan.outcome == 'failure' }}
-    env:
-      B2_BUCKET: ${{ vars.B2_BUCKET }}
-      B2_ACCESS_KEY: ${{ secrets.B2_ACCESS_KEY }}
-      B2_SECRET_KEY: ${{ secrets.B2_SECRET_KEY }}
-      CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
-      DNSIMPLE_OAUTH_TOKEN: ${{ secrets.DNSIMPLE_OAUTH_TOKEN }}
-      GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
-      GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
-      GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
-      GITEA_DB_PASSWORD: ${{ secrets.GITEA_DB_PASSWORD }}
-      GITEA_RESTORE: ${{ inputs.recover }}
-      NAS_HOST: ${{ vars.NAS_HOST }}
-      NAS_SSH_USER: ${{ vars.NAS_SSH_USER }}
-      NAS_SSH_PASSWORD: ${{ secrets.NAS_SSH_PASSWORD }}
-      SSH_KEY: ${{ secrets.SSH_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Ansible in a venv if needed
-        run: |
-          if ! (command -v ansible-playbook &> /dev/null && command -v ansible-galaxy &> /dev/null); then
-            echo "Ansible not found, installing into a virtual environment..."
-            python3 --version
-            python3 -m venv .venv
-            .venv/bin/pip install ansible==11.7.0
-            echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
-          else
-            echo "Ansible is already available on the PATH."
-          fi
-
-      - name: Plan destructive restore (no side-effects)
-        id: plan
-        continue-on-error: true
-        uses: dawidd6/action-ansible-playbook@v4
-        with:
-          playbook: gitea-deploy.yml
-          directory: ./playbooks
-          configuration: |
-            [ssh_connection]
-            ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o ControlPath=/tmp/ansible-ssh-%%h-%%p-%%r
-          key: ${{ secrets.SSH_KEY }}
-          inventory: |
-            [nas]
-            ${{ vars.NAS_HOST }} ansible_user="${{ vars.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
-          requirements: galaxy-requirements.yml
-
-      - name: Show plan result
-        if: needs.plan.outputs.restore_needed == 'true'
-        run: echo "⚠️ Overlaps detected; manual approval required."
-
-  approve:
-    name: 2) Await manual approval
-    needs: plan
-    if: ${{ needs.plan.outputs.restore_needed == 'true' && inputs.recover == 'true' }}
-    runs-on: self-hosted
-    environment: production-restore
-    steps:
-      - run: echo "Waiting for approval to proceed with restore…"
-
-  restore:
-    name: 3) Execute restore
-    needs: [plan, approve]
-    if: ${{ inputs.recover == 'true' }}
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Ansible in a venv if needed
-        run: |
-          if ! (command -v ansible-playbook &> /dev/null && command -v ansible-galaxy &> /dev/null); then
-            echo "Ansible not found, installing into a virtual environment..."
-            python3 -m venv .venv
-            .venv/bin/pip install ansible
-            echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
-          else
-            echo "Ansible is already available on the PATH."
-          fi
-
-      - name: Execute destructive restore
-        uses: dawidd6/action-ansible-playbook@v4
-        with:
-          playbook: gitea-deploy.yml
-          directory: ./playbooks
-          key: ${{ secrets.SSH_KEY }}
-          inventory: |
-            [nas]
-            ${{ vars.NAS_SSH_USER }}@${{ vars.NAS_HOST }} ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
-          requirements: galaxy-requirements.yml
-          options: >
-            --skip-tags plan-restore
-            --extra-vars "
-            restore=${{ inputs.recover }} 
-            certbot_email=${{ vars.CERTBOT_EMAIL }} 
-            dnsimple_oauth_token=${{ secrets.DNSIMPLE_OAUTH_TOKEN }}
-            "
+  bootstrap:
+    name: Deploy Bootstrap Kernel Infrastructure
+    uses: ./.github/workflows/common-bootstrap.yml
+    with:
+      dry_run: false
+    secrets: inherit
