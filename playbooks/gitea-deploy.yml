@@ -28,6 +28,7 @@
     gitea_domain: "nas.lan.jaxzin.com"
     gitea_port: "8443"
     gitea_data_path: "/volume1/docker/gitea"
+    gitea_runner_data_path: "{{ gitea_data_path }}/gitea-runner"
     certbot_data_path: "/volume1/docker/certbot"
     # Gitea configuration paths
     gitea_app_ini_path_host: "{{ gitea_data_path }}/conf/app.ini"
@@ -36,6 +37,8 @@
     gitea_image_tag: "1.24.2-rootless"
     gitea_image: "gitea/gitea:{{ gitea_image_tag }}"
     gitea_db_image: "mysql:8"
+    gitea_runner_image_tag: "0.2.12"
+    gitea_runner_image: "gitea/act_runner:{{ gitea_runner_image_tag }}"
     # Database credentials (from environment)
     gitea_db_name: "gitea"
     gitea_db_user: "gitea"
@@ -98,6 +101,7 @@
       loop:
         - gitea
         - db
+        - gitea-runner
       tags: directories
 
     - name: Create conf directory for Gitea
@@ -246,7 +250,7 @@
         command: >
           /bin/sh -c "
           /app/gitea/gitea admin user list
-          --config {{ gitea_app_ini_path_container }} | grep -q '^{{ gitea_admin_username }}\b'
+          --config {{ gitea_app_ini_path_container }} | grep -q '\b{{ gitea_admin_username }}\b'
           "
       register: admin_check
       failed_when: admin_check.rc not in [0, 1] # Only fail on unexpected return codes
@@ -269,6 +273,114 @@
       when: admin_check.rc != 0
       register: admin_create
       changed_when: admin_create.rc == 0
+
+    - name: Check if Gitea API token is already persisted
+      stat:
+        path: "{{ gitea_data_path }}/conf/api_token.txt"
+      register: api_token_file
+
+    - name: Load Gitea API token from remote file if it exists
+      block:
+        - name: Read Gitea API token from remote file
+          command: "cat {{ gitea_data_path }}/conf/api_token.txt"
+          register: api_token_content
+          changed_when: false
+
+        - name: Set Gitea API token fact
+          set_fact:
+            gitea_api_token: "{{ api_token_content.stdout | trim }}"
+      when: api_token_file.stat.exists
+
+    - name: Generate and persist Gitea API token if it does not exist
+      when: not api_token_file.stat.exists
+      block:
+        - name: Create Gitea API token via API
+          ansible.builtin.uri:
+            url: "https://{{ gitea_domain }}:{{ gitea_port }}/api/v1/users/{{ gitea_admin_username }}/tokens"
+            method: POST
+            user: "{{ gitea_admin_username }}"
+            password: "{{ gitea_admin_password }}"
+            force_basic_auth: yes
+            validate_certs: no
+            body_format: json
+            body:
+              name: "ansible-bootstrap-token"
+              scopes: ["read:admin", "write:admin"]
+            status_code:
+              - 200
+              - 201
+          register: new_token_result
+
+        - name: Set API token fact from new token
+          set_fact:
+            gitea_api_token: "{{ new_token_result.json.sha1 }}"
+
+        - name: Persist the new API token to the filesystem
+          copy:
+            content: "{{ gitea_api_token }}"
+            dest: "{{ gitea_data_path }}/conf/api_token.txt"
+            owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+            group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+            mode: '0600'
+
+    - name: Check if Gitea runner token is already persisted
+      stat:
+        path: "{{ gitea_data_path }}/conf/runner_token.txt"
+      register: runner_token_file
+
+    - name: Load Gitea runner token from remote file if it exists
+      block:
+        - name: Read Gitea runner token from remote file
+          command: "cat {{ gitea_data_path }}/conf/runner_token.txt"
+          register: runner_token_content
+          changed_when: false
+        - name: Set Gitea runner token fact
+          set_fact:
+            gitea_runner_token: "{{ runner_token_content.stdout | trim }}"
+      when: runner_token_file.stat.exists
+
+    - name: Generate and persist Gitea runner token if it does not exist
+      when: not runner_token_file.stat.exists
+      block:
+        - name: Get Gitea runner registration token
+          uri:
+            url: "https://{{ gitea_domain }}:{{ gitea_port }}/api/v1/admin/runners/registration-token"
+            method: GET
+            headers:
+              Authorization: "token {{ gitea_api_token }}"
+            validate_certs: no
+          register: new_runner_token_result
+
+        - name: Set runner token fact from new token
+          set_fact:
+            gitea_runner_token: "{{ new_runner_token_result.json.token }}"
+
+        - name: Persist the new runner token to the filesystem
+          copy:
+            content: "{{ gitea_runner_token }}"
+            dest: "{{ gitea_data_path }}/conf/runner_token.txt"
+            owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+            group: "users"
+            mode: '0600'
+
+    - name: Deploy Gitea runner container
+      community.docker.docker_container:
+        name: gitea-runner
+        image: "{{ gitea_runner_image }}"
+        state: started
+        restart_policy: always
+        networks:
+          - name: gitea-net
+        dns_opts:
+          - "ndots:0"
+        env:
+          GITEA_INSTANCE_URL: "https://{{ gitea_domain }}:{{ gitea_port }}"
+          GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
+          GITEA_RUNNER_NAME: "nas-runner"
+          GITEA_RUNNER_LABELS: "docker,linux,amd64"
+        volumes:
+          - "{{ gitea_runner_data_path }}:/data"
+          - "/var/run/docker.sock:/var/run/docker.sock"
 
     - block:
         - name: Ensure B2 CLI is installed (plan-restore)
