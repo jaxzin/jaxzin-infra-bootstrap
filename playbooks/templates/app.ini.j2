@@ -6,6 +6,7 @@ DOMAIN           = {{ gitea_domain }}
 ROOT_URL         = https://{{ gitea_domain }}:{{ gitea_port }}/
 CERT_FILE        = /etc/letsencrypt/live/{{ gitea_domain }}/fullchain.pem
 KEY_FILE         = /etc/letsencrypt/live/{{ gitea_domain }}/privkey.pem
+SSH_PORT         = {{ gitea_ssh_port }}
 
 [database]
 DB_TYPE          = mysql

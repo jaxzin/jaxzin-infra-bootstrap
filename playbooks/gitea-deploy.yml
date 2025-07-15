@@ -27,6 +27,7 @@
     # Domain and data paths
     gitea_domain: "nas.lan.jaxzin.com"
     gitea_port: "8443"
+    gitea_ssh_port: "22222"
     gitea_data_path: "/volume1/docker/gitea"
     gitea_runner_data_path: "{{ gitea_data_path }}/gitea-runner"
     certbot_data_path: "/volume1/docker/certbot"
@@ -219,7 +220,7 @@
           USER_GID: "1000"
         ports:
           - "{{ gitea_port }}:3000"
-          - "22222:22"
+          - "{{ gitea_ssh_port }}:22"
         volumes:
           - "{{ gitea_data_path }}/gitea:/data"
           - "{{ gitea_app_ini_path_host }}:{{ gitea_app_ini_path_container }}"
