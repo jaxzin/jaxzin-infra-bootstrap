@@ -1,0 +1,39 @@
+# .github/workflows/health-check.yml
+name: Infrastructure Health Check
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # daily
+
+jobs:
+  health-check:
+    uses: ./.github/workflows/common-bootstrap.yml
+    with:
+      dry_run: true
+    secrets: inherit
+
+  notify-on-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: health-check
+    if: failure()
+    steps:
+      - name: Notify Discord on failure
+        uses: Ilshidur/action-discord@0.3.2
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        with:
+          args: ":rotating_light: The daily infrastructure health check failed!"
+
+  notify-on-success:
+    name: Notify on Success
+    runs-on: ubuntu-latest
+    needs: health-check
+    if: success()
+    steps:
+      - name: Notify Discord on success
+        uses: Ilshidur/action-discord@0.3.2
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        with:
+          args: ":white_check_mark: The daily infrastructure health check passed."

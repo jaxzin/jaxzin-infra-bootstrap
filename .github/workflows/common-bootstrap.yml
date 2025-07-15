@@ -6,32 +6,52 @@ on:
         description: "If true, run Ansible in --check mode"
         required: true
         type: boolean
-      restore:
-        description: "If true, fetch & extract the Backblaze backup"
-        required: true
-        type: boolean
 
 jobs:
   bootstrap:
     runs-on: self-hosted
+    env:
+      CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      DNSIMPLE_OAUTH_TOKEN: ${{ secrets.DNSIMPLE_OAUTH_TOKEN }}
+      GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+      GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+      GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+      GITEA_DB_PASSWORD: ${{ secrets.GITEA_DB_PASSWORD }}
+      GITEA_RESTORE: ${{ inputs.recover }}
+      NAS_HOST: ${{ vars.NAS_HOST }}
+      NAS_SSH_USER: ${{ vars.NAS_SSH_USER }}
+      NAS_SSH_PASSWORD: ${{ secrets.NAS_SSH_PASSWORD }}
+      SSH_KEY: ${{ secrets.SSH_KEY }}
     steps:
       - name: Checkout IaC
         uses: actions/checkout@v4
 
-      - name: Configure SSH key
+      - name: Set up Ansible in a venv if needed
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-
-      - name: Bootstrap Gitea on NAS
-        shell: bash
-        run: |
-          EXTRA=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            EXTRA="--check --diff"
+          if ! (command -v ansible-playbook &> /dev/null && command -v ansible-galaxy &> /dev/null); then
+            echo "Ansible not found, installing into a virtual environment..."
+            python3 --version
+            python3 -m venv .venv
+            .venv/bin/pip install ansible==11.7.0
+            echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
+          else
+            echo "Ansible is already available on the PATH."
           fi
-          ansible-playbook playbooks/gitea-deploy.yml \
-            -i "${{ secrets.NAS_HOST }}," \
-            $EXTRA \
-            --extra-vars "restore=${{ inputs.restore }}"
+
+      - name: Deploy infrastructure
+        id: deploy
+        continue-on-error: true
+        uses: dawidd6/action-ansible-playbook@v4
+        with:
+          playbook: gitea-deploy.yml
+          directory: ./playbooks
+          configuration: |
+            [ssh_connection]
+            ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o ControlPath=/tmp/ansible-ssh-%%h-%%p-%%r
+          key: ${{ secrets.SSH_KEY }}
+          inventory: |
+            [nas]
+            ${{ vars.NAS_HOST }} ansible_user="${{ vars.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
+          requirements: galaxy-requirements.yml
+          options: ${{ inputs.dry_run == 'true' && '--check --diff' || '' }}

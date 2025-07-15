@@ -46,13 +46,9 @@
     gitea_admin_username: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_USERNAME') }}"
     gitea_admin_password: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_PASSWORD') }}"
     gitea_admin_email: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_EMAIL') }}"
-    # Backblaze B2 backup settings
-    b2_bucket: "{{ lookup('ansible.builtin.env','B2_ACCESS_KEY') }}"
-    b2_access_key: "{{ lookup('ansible.builtin.env','B2_ACCESS_KEY') }}"
-    b2_secret_key: "{{ lookup('ansible.builtin.env','B2_SECRET_KEY') }}"
     # SSL/TLS certificate management
     dsm_cert_name: nas-lan
-    restore: "{{ lookup('ansible.builtin.env', 'GITEA_RESTORE') | bool }}"
+    discord_webhook: "{{ lookup('ansible.builtin.env', 'DISCORD_WEBHOOK') }}"
   roles:
     - role: tafeen.synology.syno_pkg_install
       syno_pkg_name: "Container Manager"
@@ -66,17 +62,14 @@
           - lookup('vars', item) | string != ""
         fail_msg: "The required variable '{{ item }}' is undefined or is empty."
       loop:
-        - b2_bucket
-        - b2_access_key
-        - b2_secret_key
         - certbot_email
+        - discord_webhook
         - dnsimple_endpoint
         - dnsimple_oauth_token
         - gitea_admin_username
         - gitea_admin_password
         - gitea_admin_email
         - gitea_db_password
-        - restore
 
     - name: Install Python3
       include_role:
@@ -382,73 +375,7 @@
           - "{{ gitea_runner_data_path }}:/data"
           - "/var/run/docker.sock:/var/run/docker.sock"
 
-    - block:
-        - name: Ensure B2 CLI is installed (plan-restore)
-          pip:
-            name: b2
-            state: present
-
-        - name: Download backup tarball for planning
-          command: >
-            b2 download-file-by-name
-            "{{ b2_bucket }}"
-            "latest-gitea-backup.tar.gz"
-            "/tmp/gitea-backup.tar.gz"
-          environment:
-            B2_APPLICATION_KEY_ID: "{{ b2_access_key }}"
-            B2_APPLICATION_KEY: "{{ b2_secret_key }}"
-          args:
-            creates: "/tmp/gitea-backup.tar.gz"
-
-        - name: Detect overlaps
-          shell: |
-            tar -tf /tmp/gitea-backup.tar.gz | while read f; do
-              if [ -e "{{ gitea_data_path }}/$f" ]; then
-                echo "$f"
-              fi
-            done
-          args:
-            executable: /bin/bash
-          register: overlaps
-          changed_when: false
-
-        - name: Abort on overlaps
-          fail:
-            msg: |
-              Destructive restore would overwrite these files:
-              {{ overlaps.stdout_lines | join('\n  - ') }}
-      when: restore | default(false) | bool
-      tags: plan-restore
-
-    - name: Restore latest backup from Backblaze
-      when:
-        - restore | default(false) | bool
-        - not ansible_check_mode
-      block:
-        - name: Ensure B2 CLI is installed (restore)
-          pip:
-            name: b2
-            state: present
-
-        - name: Download backup archive
-          command: >
-            b2 download-file-by-name
-            "{{ b2_bucket }}"
-            "latest-gitea-backup.tar.gz"
-            "/tmp/gitea-backup.tar.gz"
-          environment:
-            B2_APPLICATION_KEY_ID: "{{ b2_access_key }}"
-            B2_APPLICATION_KEY: "{{ b2_secret_key }}"
-          args:
-            creates: "/tmp/gitea-backup.tar.gz"
-
-        - name: Extract backup
-          unarchive:
-            src: "/tmp/gitea-backup.tar.gz"
-            dest: "{{ gitea_data_path }}"
-            remote_src: yes
-          notify: Restart Gitea
-      tags: restore
+    
 
   handlers:
     - name: Restart Gitea

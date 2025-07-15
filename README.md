@@ -42,10 +42,10 @@ GitHub runner is used for disaster recovery (DR) workflows only.
 
 ## My Methodology
 
-1. **Daily Deployments**: Pushes to `.gitea/workflows/deploy.yml` trigger real applies via my Gitea runners (`dry_run=false, restore=false`).
+1. **Daily Deployments**: Pushes to `.gitea/workflows/deploy.yml` trigger real applies via my Gitea runners (`dry_run=false`).
 2. **Mirror & Monitor**: All IaC is mirrored to GitHub. A daily job checks the mirror and notifies Discord if stale.
-3. **DR Test**: Monthly scheduled run on GitHub uses `dry_run=true, restore=false` to validate playbooks in check mode.
-4. **On-Demand Recovery**: The DR workflow is manual and two-phased—first a "plan" detect overlaps, then a gated "restore" with `--skip-tags plan-restore`.
+3. **DR Test**: Daily scheduled run on GitHub uses `dry_run=true` to validate playbooks in check mode.
+4. **On-Demand Recovery**: The DR workflow is manual and two-phased—first a "plan" detect overlaps, then a gated "restore".
 
 ---
 
@@ -158,18 +158,30 @@ Register at least one self-hosted GitHub runner off the NAS, labeled `dr`.
 ### Daily Gitea Workflow (`.gitea/workflows/deploy.yml`)
 
 * Runs on push.
-* Calls `common-bootstrap.yml` with `dry_run=false, restore=false`.
+* Calls `common-bootstrap.yml` with `dry_run=false`.
 
 ### Common Bootstrap (`.github/workflows/common-bootstrap.yml`)
 
 * Reusable steps: checkout, SSH setup, run Ansible.
-* Inputs: `dry_run`, `restore`.
+* Input: `dry_run`.
 
-### DR Bootstrap (`.github/workflows/bootstrap.yml`)
+### Bootstrap (`.github/workflows/bootstrap.yml`)
 
-* **Plan job** uses `--tags plan-restore` to detect overlaps and exits non-zero if found.
+* Manually triggered.
+* Calls `common-bootstrap.yml` with `dry_run=false` to provision the infrastructure.
+
+### Restore (`.github/workflows/restore.yml`)
+
+* Manually triggered.
+* **Plan Restore job** uses `--tags plan-restore` to detect overlaps and exits non-zero if found.
 * **Approval job** gated on overlaps and requires manual approval (protected env).
-* **Restore job** runs with `--skip-tags plan-restore --extra-vars "restore=true"`.
+* **Execute Restore job** runs `gitea-restore.yml` to restore Gitea data from backup.
+
+### Health Check (`.github/workflows/health-check.yml`)
+
+* Daily.
+* Calls `common-bootstrap.yml` with `dry_run=true`.
+* Notifies Discord on success or failure.
 
 ### Mirror-Health Check (`.github/workflows/mirror-health.yml`)
 

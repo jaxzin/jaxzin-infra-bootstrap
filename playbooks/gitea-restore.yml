@@ -1,0 +1,84 @@
+# playbooks/gitea-restore.yml
+---
+# Ansible playbook to restore Gitea on my Synology NAS
+- name: Restore Gitea on Synology NAS
+  hosts: nas
+  become: true
+  vars:
+    gitea_data_path: "/volume1/docker/gitea"
+    # Backblaze B2 backup settings
+    b2_bucket: "{{ lookup('ansible.builtin.env','B2_ACCESS_KEY') }}"
+    b2_access_key: "{{ lookup('ansible.builtin.env','B2_ACCESS_KEY') }}"
+    b2_secret_key: "{{ lookup('ansible.builtin.env','B2_SECRET_KEY') }}"
+  tasks:
+    - block:
+        - name: Ensure B2 CLI is installed (plan-restore)
+          pip:
+            name: b2
+            state: present
+
+        - name: Download backup tarball for planning
+          command: >
+            b2 download-file-by-name
+            "{{ b2_bucket }}"
+            "latest-gitea-backup.tar.gz"
+            "/tmp/gitea-backup.tar.gz"
+          environment:
+            B2_APPLICATION_KEY_ID: "{{ b2_access_key }}"
+            B2_APPLICATION_KEY: "{{ b2_secret_key }}"
+          args:
+            creates: "/tmp/gitea-backup.tar.gz"
+
+        - name: Detect overlaps
+          shell: |
+            tar -tf /tmp/gitea-backup.tar.gz | while read f; do
+              if [ -e "{{ gitea_data_path }}/$f" ]; then
+                echo "$f"
+              fi
+            done
+          args:
+            executable: /bin/bash
+          register: overlaps
+          changed_when: false
+
+        - name: Abort on overlaps
+          fail:
+            msg: |
+              Destructive restore would overwrite these files:
+              {{ overlaps.stdout_lines | join('\n  - ') }}
+      tags: plan-restore
+
+    - name: Restore latest backup from Backblaze
+      when: not ansible_check_mode
+      block:
+        - name: Ensure B2 CLI is installed (restore)
+          pip:
+            name: b2
+            state: present
+
+        - name: Download backup archive
+          command: >
+            b2 download-file-by-name
+            "{{ b2_bucket }}"
+            "latest-gitea-backup.tar.gz"
+            "/tmp/gitea-backup.tar.gz"
+          environment:
+            B2_APPLICATION_KEY_ID: "{{ b2_access_key }}"
+            B2_APPLICATION_KEY: "{{ b2_secret_key }}"
+          args:
+            creates: "/tmp/gitea-backup.tar.gz"
+
+        - name: Extract backup
+          unarchive:
+            src: "/tmp/gitea-backup.tar.gz"
+            dest: "{{ gitea_data_path }}"
+            remote_src: yes
+          notify: Restart Gitea
+      tags: restore
+
+  handlers:
+    - name: Restart Gitea
+      community.docker.docker_container:
+        name: gitea
+        state: started
+        restart: yes

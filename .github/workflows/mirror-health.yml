@@ -25,15 +25,6 @@ jobs:
             echo "Mirror healthy: $delta hours since last commit"
           fi
 
-      - name: Notify Slack on failure
-        if: failure()
-        uses: slackapi/slack-github-action@v2
-        with:
-          payload: |
-            { "text": ":rotating_light: Mirror has not updated in over 24 hours!" }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
       - name: Notify Discord on failure
         if: failure()
         uses: Ilshidur/action-discord@0.3.2

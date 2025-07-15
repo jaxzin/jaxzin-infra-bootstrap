@@ -15,9 +15,9 @@ send_notification() {
   # Use Synology's native notification system
   /usr/syno/bin/synoservicectl --notify "${subject}" "${message}"
   # If you prefer Discord, uncomment and configure the following:
-  # if [ -n "{{ lookup('env','DISCORD_WEBHOOK_URL') }}" ]; then
-  #   curl -H "Content-Type: application/json" -X POST -d "{\"username\": \"Certbot Alert\", \"content\": \"${subject}: ${message}\"}" "{{ lookup('env','DISCORD_WEBHOOK_URL') }}"
-  # fi
+  if [ -n "{{ discord_webhook }}" ]; then
+    curl -H "Content-Type: application/json" -X POST -d "{\"username\": \"Certbot Alert\", \"content\": \"${subject}: ${message}\"}" "{{ discord_webhook }}"
+  fi
 }
 
 # --- Error Trap ---
