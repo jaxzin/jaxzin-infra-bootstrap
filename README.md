@@ -30,6 +30,12 @@ The only prerequisites to performing a disaster recovery are:
 │   └── mirror-health.yml    # Daily mirror-health check + Discord alerts
 playbooks/                    # My Ansible playbooks & roles (NAS, Gitea, DNS, certs)
 inventory.ini (or hosts.yml) # Ansible inventory for my network hosts
+
+### Gitea Runner
+
+This bootstrap process also installs and configures a Gitea runner on the Synology NAS. This runner is responsible for 
+executing CI/CD workflows defined in your Gitea repositories for the majority of my home network's IaC. The 
+GitHub runner is used for disaster recovery (DR) workflows only.
 ```
 
 ---
