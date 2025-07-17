@@ -1,0 +1,36 @@
+#!/bin/bash
+set -e
+
+GITEA_CONTAINER_NAME="{{ gitea_container_name | default('gitea') }}"
+GITEA_USER="{{ gitea_user | default('git') }}"
+HOST_DATA_DIR="/volume1/docker/gitea"
+HOST_BACKUP_DIR="$HOST_DATA_DIR/backups"
+LOG_FILE="$HOST_DATA_DIR/logs/gitea-dump.log"
+HOST_DUMP_FILE="$HOST_BACKUP_DIR/gitea-dump-$(date +%Y-%m-%d-%H%M%S).tar.gz"
+RETENTION_DAYS={{ gitea_dump_retention_days | default(7) }}
+
+{
+  echo "--- Starting Gitea Dump: $(date) ---"
+
+  # Create backup directory on the host if it doesn't exist
+  echo "Ensuring backup directory exists on host: $HOST_BACKUP_DIR"
+  mkdir -p "$HOST_BACKUP_DIR"
+
+  # Stop Gitea container
+  #echo "Stopping Gitea container: $GITEA_CONTAINER_NAME..."
+  #docker stop "$GITEA_CONTAINER_NAME"
+
+  # Create Gitea dump by redirecting stdout from the container to a file on the host
+  echo "Creating Gitea dump and saving to host path: $HOST_DUMP_FILE"
+  docker exec -u "$GITEA_USER" "$GITEA_CONTAINER_NAME" gitea dump --type tar.gz --file - > "$HOST_DUMP_FILE"
+
+  # Restart Gitea container
+  #echo "Starting Gitea container: $GITEA_CONTAINER_NAME..."
+  #docker start "$GITEA_CONTAINER_NAME"
+
+  # Prune old backups from the host
+  echo "Pruning backups older than $RETENTION_DAYS days..."
+  find "$HOST_BACKUP_DIR" -name "gitea-dump-*.tar.gz" -mtime +$RETENTION_DAYS -exec rm {} \;
+
+  echo "--- Gitea Dump Complete: $(date) ---"
+} >> "$LOG_FILE" 2>&1

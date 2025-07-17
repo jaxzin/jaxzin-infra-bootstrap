@@ -1,0 +1,4 @@
+---
+- name: Restart HyperBackup
+  ansible.builtin.command:
+    cmd: /usr/syno/bin/synopkg restart HyperBackup

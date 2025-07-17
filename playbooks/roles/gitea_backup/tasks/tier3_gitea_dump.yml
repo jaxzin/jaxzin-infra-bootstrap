@@ -1,0 +1,32 @@
+---
+- name: Tier 3 | Ensure backup directory exists
+  ansible.builtin.file:
+    path: "/volume1/docker/gitea/backups"
+    state: directory
+    mode: '0755'
+
+- name: Tier 3 | Ensure directories exists
+  file:
+    path: "/volume1/docker/gitea/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - scripts
+    - logs
+
+- name: Tier 3 | Copy Gitea dump script to NAS
+  ansible.builtin.template:
+    src: gitea_dump.sh.j2
+    dest: "/volume1/docker/gitea/scripts/gitea_dump.sh"
+    mode: '0755'
+
+- name: Tier 3 | Schedule Gitea dump script
+  ansible.builtin.import_role:
+    name: tafeen.synology.syno_crontab
+  vars:
+    minute: "0"
+    hour: "2"
+    user: "root"
+    job: "/volume1/docker/gitea/scripts/gitea_dump.sh"

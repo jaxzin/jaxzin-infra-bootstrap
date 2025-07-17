@@ -1,0 +1,11 @@
+---
+- name: Include Tier 1 tasks
+  ansible.builtin.include_tasks: tier1_btrfs.yml
+
+- name: Include Tier 2 tasks
+  ansible.builtin.include_tasks: tier2_hyperbackup.yml
+
+- name: Include Tier 3 tasks
+  ansible.builtin.include_tasks: tier3_gitea_dump.yml
+
+

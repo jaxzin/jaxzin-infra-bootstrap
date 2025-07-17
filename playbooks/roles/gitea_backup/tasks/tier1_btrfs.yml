@@ -1,0 +1,10 @@
+---
+- name: Tier 1 | Ensure Snapshot Replication package is installed
+  include_role:
+    name: tafeen.synology.syno_pkg_install
+  vars:
+    syno_pkg_name: SnapshotReplication
+    syno_pkg_state: present
+
+# TODO: Add a task to ensure the Snapshot Replication service is configured for the Gitea volume
+# Will probably require running sqlite3 commands to set the correct parameters

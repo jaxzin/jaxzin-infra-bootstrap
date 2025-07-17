@@ -237,36 +237,39 @@
       retries: 15          # Try 15 times
       delay: 5             # Wait 5 seconds between retries (total wait time: 75s)
       changed_when: false  # This task just checks status, it doesn't make a change
+      when: not ansible_check_mode
 
-    - name: Check if Gitea admin user exists
-      community.docker.docker_container_exec:
-        container: gitea
-        command: >
-          /bin/sh -c "
-          /app/gitea/gitea admin user list
-          --config {{ gitea_app_ini_path_container }} | grep -q '\b{{ gitea_admin_username }}\b'
-          "
-      register: admin_check
-      failed_when: admin_check.rc not in [0, 1] # Only fail on unexpected return codes
-      changed_when: false # This task is just a check, not a change
+    - block:
+      - name: Check if Gitea admin user exists
+        community.docker.docker_container_exec:
+          container: gitea
+          command: >
+            /bin/sh -c "
+            /app/gitea/gitea admin user list
+            --config {{ gitea_app_ini_path_container }} | grep -q '\b{{ gitea_admin_username }}\b'
+            "
+        register: admin_check
+        failed_when: admin_check.rc not in [0, 1] # Only fail on unexpected return codes
+        changed_when: false # This task is just a check, not a change
 
-    - debug:
-        msg: "Admin user '{{ gitea_admin_username }}' already exists: {{ admin_check.rc == 0 }}"
-        verbosity: 1
+      - debug:
+          msg: "Admin user '{{ gitea_admin_username }}' already exists: {{ admin_check.rc == 0 }}"
+          verbosity: 1
 
-    - name: Create Gitea admin user inside the container
-      community.docker.docker_container_exec:
-        container: gitea
-        command: >
-          /app/gitea/gitea admin user create
-          --config {{ gitea_app_ini_path_container }}
-          --username '{{ gitea_admin_username }}'
-          --password '{{ gitea_admin_password }}'
-          --email '{{ gitea_admin_email }}'
-          --admin
-      when: admin_check.rc != 0
-      register: admin_create
-      changed_when: admin_create.rc == 0
+      - name: Create Gitea admin user inside the container
+        community.docker.docker_container_exec:
+          container: gitea
+          command: >
+            /app/gitea/gitea admin user create
+            --config {{ gitea_app_ini_path_container }}
+            --username '{{ gitea_admin_username }}'
+            --password '{{ gitea_admin_password }}'
+            --email '{{ gitea_admin_email }}'
+            --admin
+        when: admin_check.rc != 0
+        register: admin_create
+        changed_when: admin_create.rc == 0
+      when: not ansible_check_mode
 
     - name: Check if Gitea API token is already persisted
       stat:
@@ -376,7 +379,18 @@
           - "{{ gitea_runner_data_path }}:/data"
           - "/var/run/docker.sock:/var/run/docker.sock"
 
-    
+- name: Configure Gitea Backups
+  hosts: nas
+  become: true
+  vars:
+    # Backup configuration variables
+    hyperbackup_b2_remote_bucket: "{{ lookup('ansible.builtin.env', 'HYPERBACKUP_B2_REMOTE_BUCKET') }}"
+    hyperbackup_b2_remote_key: "{{ lookup('ansible.builtin.env', 'HYPERBACKUP_B2_REMOTE_KEY') }}"
+    hyperbackup_b2_remote_secret: "{{ lookup('ansible.builtin.env', 'HYPERBACKUP_B2_REMOTE_SECRET') }}"
+  roles:
+    - gitea_backup
+  tags:
+    - backup_config
 
   handlers:
     - name: Restart Gitea
