@@ -61,7 +61,7 @@ GITEA_NETWORK_NAME="{{ gitea_network_name | default('host') }}"
 
   # 5. Upload the file to B2
   echo "Uploading $DUMP_FILENAME to B2 bucket: $B2_BUCKET_NAME"
-  b2 upload-file "$B2_BUCKET_NAME" "$HOST_DUMP_FILE" "$DUMP_FILENAME"
+  b2 file upload "$B2_BUCKET_NAME" "$HOST_DUMP_FILE" "$DUMP_FILENAME"
 
   # 6. Clean up the local dump file
   echo "Removing local dump file: $HOST_DUMP_FILE"
