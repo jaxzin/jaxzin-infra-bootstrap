@@ -13,7 +13,7 @@ The only prerequisites to performing a disaster recovery are:
 3. there is a Synology NAS available on the home network...
 4. with the hostname defined in the Github repo's secret `SSH_NAS_HOST` and...
 5. the "Container Manager" package (aka Docker) is compatible with this NAS...
-6. and there is a latest backup of the Gitea data on Backblaze in the `B2_BUCKET`
+6. and there is a latest backup of the Gitea data on Backblaze in the `B2_BUCKET_NAME`
 
 ---
 
@@ -118,9 +118,15 @@ In Gitea (Settings → Actions → Variables):
 | `SSH_KEY`             | SSH private key for `admin` on NAS    |
 | `NAS_SSH_USER`        | NAS SSH user (`admin`)                |
 | `NAS_HOST`            | FQDN/IP of NAS (`nas.lan.jaxzin.com`) |
-| `B2_ACCESS_KEY`       | Backblaze B2 key ID                   |
-| `B2_SECRET_KEY`       | Backblaze B2 Secret Key               |
+| `B2_APPLICATION_KEY_ID` | Backblaze B2 Application Key ID       |
+| `B2_APPLICATION_KEY`    | Backblaze B2 Application Key          |
 | `DISCORD_WEBHOOK_URL` | Discord webhook for mirror-health     |
+| `GITEA_ADMIN_USERNAME`| Gitea Admin Username                  |
+| `GITEA_ADMIN_PASSWORD`| Gitea Admin Password                  |
+| `GITEA_ADMIN_EMAIL`   | Gitea Admin Email                     |
+| `GITEA_DB_PASSWORD`   | Gitea Database Password               |
+| `DNSIMPLE_OAUTH_TOKEN`| DNSimple OAuth Token                  |
+| `CERTBOT_EMAIL`       | Certbot Email Address                 |
 
 Ensure at least one Gitea runner (Docker) is registered and online.
 
@@ -142,12 +148,27 @@ In GitHub (Settings → Secrets → Actions):
 
 | Secret                | Value/Purpose              |
 | --------------------- | -------------------------- |
-| `SSH_KEY`             | Same NAS SSH key           |
-| `NAS_SSH_USER`        | Same NAS SSH user          |
-| `NAS_SSH_HOST`        | FQDN/IP of NAS             |
-| `B2_ACCESS_KEY`       | Backblaze B2 key ID        |
-| `B2_SECRET_KEY`       | Backblaze B2 Secret Key    |
-| `DISCORD_WEBHOOK_URL` | Discord webhook for alerts |
+| `SSH_KEY`             | SSH private key for NAS    |
+| `NAS_SSH_PASSWORD`    | NAS SSH user password      |
+| `B2_APPLICATION_KEY`    | Backblaze B2 Application Key    |
+| `DISCORD_WEBHOOK`     | Discord webhook for alerts |
+| `DNSIMPLE_OAUTH_TOKEN`| DNSimple OAuth Token       |
+| `GITEA_ADMIN_PASSWORD`| Gitea Admin User Password  |
+| `GITEA_DB_PASSWORD`   | Gitea Database Password    |
+
+### 5. GitHub Variables
+
+In GitHub (Settings → Variables → Actions):
+
+| Variable              | Value/Purpose              |
+| --------------------- | -------------------------- |
+| `B2_APPLICATION_KEY_ID` | Backblaze B2 Application Key ID |
+| `B2_BUCKET_NAME`      | Backblaze B2 Bucket Name   |
+| `CERTBOT_EMAIL`       | Certbot Email Address      |
+| `GITEA_ADMIN_USERNAME`| Gitea Admin Username       |
+| `GITEA_ADMIN_EMAIL`   | Gitea Admin Email          |
+| `NAS_HOST`            | FQDN/IP of NAS             |
+| `NAS_SSH_USER`        | NAS SSH user               |
 
 Register at least one self-hosted GitHub runner off the NAS, labeled `dr`.
 

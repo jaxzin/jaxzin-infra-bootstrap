@@ -7,9 +7,9 @@
   vars:
     gitea_data_path: "/volume1/docker/gitea"
     # Backblaze B2 backup settings
-    b2_bucket: "{{ lookup('ansible.builtin.env','B2_ACCESS_KEY') }}"
-    b2_access_key: "{{ lookup('ansible.builtin.env','B2_ACCESS_KEY') }}"
-    b2_secret_key: "{{ lookup('ansible.builtin.env','B2_SECRET_KEY') }}"
+    b2_bucket_name: "{{ lookup('ansible.builtin.env','B2_BUCKET_NAME') }}"
+    b2_application_key_id: "{{ lookup('ansible.builtin.env','B2_APPLICATION_KEY_ID') }}"
+    b2_application_key: "{{ lookup('ansible.builtin.env','B2_APPLICATION_KEY') }}"
   tasks:
     - block:
         - name: Ensure B2 CLI is installed (plan-restore)
@@ -20,12 +20,12 @@
         - name: Download backup tarball for planning
           command: >
             b2 download-file-by-name
-            "{{ b2_bucket }}"
+            "{{ b2_bucket_name }}"
             "latest-gitea-backup.tar.gz"
             "/tmp/gitea-backup.tar.gz"
           environment:
-            B2_APPLICATION_KEY_ID: "{{ b2_access_key }}"
-            B2_APPLICATION_KEY: "{{ b2_secret_key }}"
+            B2_APPLICATION_KEY_ID: "{{ b2_application_key_id }}"
+            B2_APPLICATION_KEY: "{{ b2_application_key }}"
           args:
             creates: "/tmp/gitea-backup.tar.gz"
 
@@ -59,12 +59,12 @@
         - name: Download backup archive
           command: >
             b2 download-file-by-name
-            "{{ b2_bucket }}"
+            "{{ b2_bucket_name }}"
             "latest-gitea-backup.tar.gz"
             "/tmp/gitea-backup.tar.gz"
           environment:
-            B2_APPLICATION_KEY_ID: "{{ b2_access_key }}"
-            B2_APPLICATION_KEY: "{{ b2_secret_key }}"
+            B2_APPLICATION_KEY_ID: "{{ b2_application_key_id }}"
+            B2_APPLICATION_KEY: "{{ b2_application_key }}"
           args:
             creates: "/tmp/gitea-backup.tar.gz"
 

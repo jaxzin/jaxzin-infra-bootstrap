@@ -1,36 +1,72 @@
 #!/bin/bash
 set -e
 
+# Gitea and Host variables
 GITEA_CONTAINER_NAME="{{ gitea_container_name | default('gitea') }}"
 GITEA_USER="{{ gitea_user | default('git') }}"
 HOST_DATA_DIR="/volume1/docker/gitea"
-HOST_BACKUP_DIR="$HOST_DATA_DIR/backups"
+HOST_BACKUP_DIR="$HOST_DATA_DIR/backups" # Used as a temp location
 LOG_FILE="$HOST_DATA_DIR/logs/gitea-dump.log"
-HOST_DUMP_FILE="$HOST_BACKUP_DIR/gitea-dump-$(date +%Y-%m-%d-%H%M%S).tar.gz"
-RETENTION_DAYS={{ gitea_dump_retention_days | default(7) }}
+DUMP_FILENAME="gitea-dump-$(date +%Y-%m-%d-%H%M%S).tar.gz"
+HOST_DUMP_FILE="$HOST_BACKUP_DIR/$DUMP_FILENAME"
+CREDENTIALS_FILE="$HOST_DATA_DIR/scripts/b2_credentials.env"
+GITEA_IMAGE="{{ gitea_image }}"
+GITEA_DATA_VOLUME="{{ gitea_data_path }}/gitea:/var/lib/gitea"
+GITEA_APP_INI_VOLUME="{{ gitea_app_ini_path_host }}:{{ gitea_app_ini_path_container }}"
+GITEA_NETWORK_NAME="{{ gitea_network_name | default('host') }}"
 
+# --- Main execution block with logging ---
 {
-  echo "--- Starting Gitea Dump: $(date) ---"
+  echo "--- Starting Gitea Dump and B2 Upload: $(date) ---"
 
-  # Create backup directory on the host if it doesn't exist
-  echo "Ensuring backup directory exists on host: $HOST_BACKUP_DIR"
+  # Function to ensure Gitea is started if it was stopped
+  function cleanup {
+    echo "Ensuring Gitea container is started..."
+    docker start "$GITEA_CONTAINER_NAME"
+  }
+
+  # Set a trap to run the cleanup function on script exit (EXIT) or error (ERR).
+  trap cleanup EXIT ERR
+
+  # 0. Source the credentials
+  if [ -f "$CREDENTIALS_FILE" ]; then
+    source "$CREDENTIALS_FILE"
+  else
+    echo "Error: Credentials file not found at $CREDENTIALS_FILE" >&2
+    exit 1
+  fi
+
+  # 1. Stop Gitea container
+  echo "Stopping Gitea container: $GITEA_CONTAINER_NAME..."
+  docker stop "$GITEA_CONTAINER_NAME"
+
+  # 2. Ensure local temp directory exists
+  echo "Ensuring local temp directory exists: $HOST_BACKUP_DIR"
   mkdir -p "$HOST_BACKUP_DIR"
 
-  # Stop Gitea container
-  #echo "Stopping Gitea container: $GITEA_CONTAINER_NAME..."
-  #docker stop "$GITEA_CONTAINER_NAME"
+  # 3. Create Gitea dump using a temporary container
+  echo "Creating Gitea dump using temporary container and saving to host path: $HOST_DUMP_FILE"
+  docker run --rm \
+    --name gitea-dump-temp \
+    --network "$GITEA_NETWORK_NAME" \
+    -u "$GITEA_USER" \
+    -v "$GITEA_DATA_VOLUME" \
+    -v "$GITEA_APP_INI_VOLUME" \
+    "$GITEA_IMAGE" \
+    gitea dump --type tar.gz --file - > "$HOST_DUMP_FILE"
 
-  # Create Gitea dump by redirecting stdout from the container to a file on the host
-  echo "Creating Gitea dump and saving to host path: $HOST_DUMP_FILE"
-  docker exec -u "$GITEA_USER" "$GITEA_CONTAINER_NAME" gitea dump --type tar.gz --file - > "$HOST_DUMP_FILE"
+  # 4. Authorize with B2
+  echo "Authorizing with B2..."
+  b2 account authorize "$B2_APPLICATION_KEY_ID" "$B2_APPLICATION_KEY"
 
-  # Restart Gitea container
-  #echo "Starting Gitea container: $GITEA_CONTAINER_NAME..."
-  #docker start "$GITEA_CONTAINER_NAME"
+  # 5. Upload the file to B2
+  echo "Uploading $DUMP_FILENAME to B2 bucket: $B2_BUCKET_NAME"
+  b2 upload-file "$B2_BUCKET_NAME" "$HOST_DUMP_FILE" "$DUMP_FILENAME"
 
-  # Prune old backups from the host
-  echo "Pruning backups older than $RETENTION_DAYS days..."
-  find "$HOST_BACKUP_DIR" -name "gitea-dump-*.tar.gz" -mtime +$RETENTION_DAYS -exec rm {} \;
+  # 6. Clean up the local dump file
+  echo "Removing local dump file: $HOST_DUMP_FILE"
+  rm "$HOST_DUMP_FILE"
 
-  echo "--- Gitea Dump Complete: $(date) ---"
+  # The cleanup trap will automatically start Gitea now.
+  echo "--- Gitea Dump and B2 Upload Complete: $(date) ---"
 } >> "$LOG_FILE" 2>&1

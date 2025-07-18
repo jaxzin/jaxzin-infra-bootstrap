@@ -1,11 +1,39 @@
 ---
-- name: Include Tier 1 tasks
-  ansible.builtin.include_tasks: tier1_btrfs.yml
+- name: Ensure Python pip and B2 CLI are installed
+  pip:
+    name: b2
+    state: present
 
-- name: Include Tier 2 tasks
-  ansible.builtin.include_tasks: tier2_hyperbackup.yml
+- name: Ensure required directories exist
+  ansible.builtin.file:
+    path: "/volume1/docker/gitea/{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - backups # This is now a temp directory
+    - scripts
+    - logs
 
-- name: Include Tier 3 tasks
-  ansible.builtin.include_tasks: tier3_gitea_dump.yml
+- name: Create secure B2 credentials file
+  ansible.builtin.template:
+    src: b2_credentials.env.j2
+    dest: "/volume1/docker/gitea/scripts/b2_credentials.env"
+    owner: root
+    group: root
+    mode: '0600' # Only root can read/write
+  no_log: true # Prevent secrets from appearing in logs
 
+- name: Copy Gitea dump script to NAS
+  ansible.builtin.template:
+    src: gitea_dump.sh.j2
+    dest: "/volume1/docker/gitea/scripts/gitea_dump.sh"
+    mode: '0755'
 
+- name: Schedule Gitea dump and B2 upload script
+  ansible.builtin.import_role:
+    name: tafeen.synology.syno_crontab
+  vars:
+    minute: "0"
+    hour: "2"
+    user: "root"
+    job: "/volume1/docker/gitea/scripts/gitea_dump.sh"

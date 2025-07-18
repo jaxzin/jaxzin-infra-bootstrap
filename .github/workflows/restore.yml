@@ -11,9 +11,9 @@ jobs:
     outputs:
       restore_needed: ${{ steps.plan.outcome == 'failure' }}
     env:
-      B2_BUCKET: ${{ vars.B2_BUCKET }}
-      B2_ACCESS_KEY: ${{ secrets.B2_ACCESS_KEY }}
-      B2_SECRET_KEY: ${{ secrets.B2_SECRET_KEY }}
+      B2_BUCKET_NAME: ${{ vars.B2_BUCKET_NAME }}
+      B2_APPLICATION_KEY_ID: ${{ vars.B2_APPLICATION_KEY_ID }}
+      B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
       NAS_HOST: ${{ vars.NAS_HOST }}
       NAS_SSH_USER: ${{ vars.NAS_SSH_USER }}
       NAS_SSH_PASSWORD: ${{ secrets.NAS_SSH_PASSWORD }}

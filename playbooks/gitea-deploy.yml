@@ -27,6 +27,7 @@
     # Domain and data paths
     gitea_domain: "nas.lan.jaxzin.com"
     gitea_port: "8443"
+    gitea_network_name: "gitea-net"
     gitea_ssh_port: "22222"
     gitea_data_path: "/volume1/docker/gitea"
     gitea_runner_data_path: "{{ gitea_data_path }}/gitea-runner"
@@ -108,7 +109,7 @@
 
     - name: Create Gitea Docker network
       community.docker.docker_network:
-        name: gitea-net
+        name: "{{ gitea_network_name }}"
         state: present
 
     - name: Create scripts directory
@@ -187,7 +188,7 @@
         state: started
         restart_policy: always
         networks:
-          - name: gitea-net
+          - name: "{{ gitea_network_name }}"
         env:
           MYSQL_ROOT_PASSWORD: "{{ gitea_db_password }}"
           MYSQL_DATABASE: "{{ gitea_db_name }}"
@@ -214,7 +215,7 @@
         state: started
         restart_policy: always
         networks:
-          - name: gitea-net
+          - name: "{{ gitea_network_name }}"
         env:
           USER_UID: "1000"
           USER_GID: "1000"
@@ -367,7 +368,7 @@
         state: started
         restart_policy: always
         networks:
-          - name: gitea-net
+          - name: "{{ gitea_network_name }}"
         dns_opts:
           - "ndots:0"
         env:
@@ -379,18 +380,17 @@
           - "{{ gitea_runner_data_path }}:/data"
           - "/var/run/docker.sock:/var/run/docker.sock"
 
-- name: Configure Gitea Backups
-  hosts: nas
-  become: true
-  vars:
-    # Backup configuration variables
-    hyperbackup_b2_remote_bucket: "{{ lookup('ansible.builtin.env', 'HYPERBACKUP_B2_REMOTE_BUCKET') }}"
-    hyperbackup_b2_remote_key: "{{ lookup('ansible.builtin.env', 'HYPERBACKUP_B2_REMOTE_KEY') }}"
-    hyperbackup_b2_remote_secret: "{{ lookup('ansible.builtin.env', 'HYPERBACKUP_B2_REMOTE_SECRET') }}"
-  roles:
-    - gitea_backup
-  tags:
-    - backup_config
+    - name: Configure Gitea Backups
+      import_role:
+        name: gitea_backup
+      become: true
+      vars:
+        # Backup configuration variables
+        b2_bucket_name: "{{ lookup('ansible.builtin.env', 'B2_BUCKET_NAME') }}"
+        b2_application_key_id: "{{ lookup('ansible.builtin.env', 'B2_APPLICATION_KEY_ID') }}"
+        b2_application_key: "{{ lookup('ansible.builtin.env', 'B2_APPLICATION_KEY') }}"
+      tags:
+        - backup_config
 
   handlers:
     - name: Restart Gitea
