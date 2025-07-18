@@ -1,6 +1,5 @@
-;; Gitea app.ini configuration, managed by Ansible
-
-WORK_PATH = /var/lib/gitea {# container path to work dir #}
+; ; Gitea app.ini configuration, managed by Ansible
+WORK_PATH = /var/lib/gitea
 
 [server]
 PROTOCOL = https
@@ -19,10 +18,10 @@ PASSWD = {{ gitea_db_password }}
 
 [security]
 INSTALL_LOCK = true
-INTERNAL_TOKEN_URI = file:{{ gitea_internal_token_path }}
+INTERNAL_TOKEN_URI = file:/etc/gitea/secrets/internal_token
 
 [actions]
 ENABLED = true
 
 [oauth2]
-JWT_SECRET_URI = file:{{ gitea_jwt_secret_path }}
+JWT_SECRET = {{ gitea_jwt_secret }}

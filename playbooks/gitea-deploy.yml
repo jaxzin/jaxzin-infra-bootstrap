@@ -52,10 +52,10 @@
     dsm_cert_name: nas-lan
     discord_webhook: "{{ lookup('ansible.builtin.env', 'DISCORD_WEBHOOK') }}"
     # Internal token for Gitea API
-    gitea_internal_token_path: "{{ gitea_data_path }}/conf/internal_token"
+    gitea_secrets_path: "{{ gitea_data_path }}/conf/secrets"
+    gitea_internal_token_path: "{{ gitea_secrets_path }}/internal_token"
     gitea_internal_token: "{{ lookup('password', '/dev/null', length=32, chars='ascii_letters,digits') }}"
     # JWT secret for Gitea OAuth2
-    gitea_jwt_secret_path: "{{ gitea_data_path }}/conf/oauth2_jwt_secret"
     gitea_jwt_secret: "{{ lookup('password', '/dev/null', length=64, chars='ascii_letters,digits') }}"
   roles:
     - role: tafeen.synology.syno_pkg_install
@@ -103,15 +103,9 @@
         - gitea
         - db
         - gitea-runner
+        - conf
+        - conf/secrets
       tags: directories
-
-    - name: Create conf directory for Gitea
-      file:
-        path: "{{ gitea_data_path }}/conf"
-        state: directory
-        owner: root
-        group: root
-        mode: '0755'
 
     - name: Create Gitea Docker network
       community.docker.docker_network:
@@ -204,15 +198,6 @@
           - "{{ gitea_data_path }}/db:/var/lib/mysql"
       tags: db
 
-    - name: Configure Gitea app.ini
-      template:
-        src: app.ini.j2
-        dest: "{{ gitea_app_ini_path_host }}"
-        owner: "1000"
-        group: "1000"
-        mode: '0640'
-      notify: Restart Gitea
-
     - name: Check if internal token file exists
       stat:
         path: "{{ gitea_internal_token_path }}"
@@ -229,20 +214,37 @@
       when: not internal_token_file.stat.exists
       notify: Restart Gitea
 
-    - name: Check if JWT secret file exists
+    - name: Check if app.ini exists
       stat:
-        path: "{{ gitea_jwt_secret_path }}"
-      register: jwt_secret_file
+        path: "{{ gitea_app_ini_path_host }}"
+      register: gitea_app_ini_stat
+      check_mode: no
 
-    - name: Ensure Gitea JWT secret file exists
-      copy:
-        dest: "{{ gitea_jwt_secret_path }}"
-        content: "{{ gitea_jwt_secret }}"
+    - name: Get the existing JWT_SECRET
+      when: gitea_app_ini_stat.stat.exists
+      block:
+        - name: Extract JWT_SECRET directly from the remote app.ini
+          ansible.builtin.command:
+            cmd: "awk -F' *= *' '/^JWT_SECRET/ {print $2}' {{ gitea_app_ini_path_host }}"
+          register: gitea_jwt_secret_raw
+          changed_when: false
+          failed_when: false  # In case JWT_SECRET doesn't exist yet
+          check_mode: no
+
+        - name: Set fact for the JWT secret, handling if it's not found
+          ansible.builtin.set_fact:
+            gitea_jwt_secret: "{{ gitea_jwt_secret_raw.stdout | trim | default(omit) }}"
+          when: gitea_jwt_secret_raw is defined
+          check_mode: no
+
+
+    - name: Configure Gitea app.ini
+      template:
+        src: app.ini.j2
+        dest: "{{ gitea_app_ini_path_host }}"
         owner: "1000"
         group: "1000"
-        mode: '0600'
-        force: no  # only write if different
-      when: not jwt_secret_file.stat.exists
+        mode: '0640'
       notify: Restart Gitea
 
     - name: Deploy Gitea container
@@ -263,6 +265,7 @@
         volumes:
           - "{{ gitea_data_path }}/gitea:/var/lib/gitea"
           - "{{ gitea_app_ini_path_host }}:{{ gitea_app_ini_path_container }}"
+          - "{{ gitea_data_path }}/conf/secrets:/etc/gitea/secrets:ro"
           - "{{ certbot_data_path }}/certs:/etc/letsencrypt:ro"
       tags: gitea
       notify: Restart Gitea
