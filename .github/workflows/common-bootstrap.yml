@@ -51,6 +51,7 @@ jobs:
           directory: ./playbooks
           configuration: |
             [ssh_connection]
+            pipelining = True
             ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o ControlPath=/tmp/ansible-ssh-%%h-%%p-%%r
           key: ${{ secrets.SSH_KEY }}
           inventory: |

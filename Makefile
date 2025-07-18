@@ -1,10 +1,19 @@
 ## Development Targets
 
-.PHONY: act-test
+.PHONY: run-bootstrap
 run-bootstrap:
-	@echo "Running GitHub Actions workflow locally with act..."
+	@echo "Running Bootstrap workflow locally with act..."
 	@act -W .github/workflows/bootstrap.yml --secret-file .secrets --var-file .vars --container-architecture linux/amd64 -P self-hosted=ghcr.io/jaxzin/jaxzin-infra-runner:latest
 
+.PHONY: deploy
+deploy:
+	@echo "Running Deploy Gitea workflow locally with act..."
+	@act -W .gitea/workflows/deploy.yml --secret-file .secrets --var-file .vars --container-architecture linux/amd64 -P self-hosted=ghcr.io/jaxzin/jaxzin-infra-runner:latest
+
+.PHONY: run-restore
+run-restore:
+	@echo "Running Restore Gitea Data workflow locally with act..."
+	@act -W .github/workflows/restore.yml --secret-file .secrets --var-file .vars --container-architecture linux/amd64 -P self-hosted=ghcr.io/jaxzin/jaxzin-infra-runner:latest
 
 .PHONY: health-check
 health-check:

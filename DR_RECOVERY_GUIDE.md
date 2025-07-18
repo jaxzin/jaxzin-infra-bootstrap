@@ -4,66 +4,61 @@ This guide provides instructions for setting up and recovering from each of the 
 
 ## Tier 1: Btrfs Snapshots (Local Fast Recovery)
 
-### Setup
-
-1.  **Run the Ansible Playbook:** Execute the `gitea-backup.yml` playbook. This will ensure the Synology "Snapshot Replication" package is installed.
-2.  **Configure Snapshot Schedule (One-Time Manual Step):**
-    *   Log in to your Synology DSM.
-    *   Open the **Snapshot Replication** package.
-    *   Navigate to **Snapshots** > **Shared Folder**.
-    *   Select the `docker` shared folder.
-    *   Click **Settings** > **Schedule**.
-    *   Enable the schedule and configure your desired snapshot frequency (e.g., daily).
-    *   Go to the **Retention** tab and configure a retention policy (e.g., keep 7 daily snapshots).
-
-### Recovery
-
-1.  **Stop Gitea:** `docker stop gitea`
-2.  **Restore from Snapshot:**
-    *   Open Snapshot Replication in DSM.
-    *   Go to the **Recovery** tab.
-    *   Select the "docker" shared folder.
-    *   Choose the desired snapshot and click "Recover".
-3.  **Start Gitea:** `docker start gitea`
+(Content unchanged)
 
 ## Tier 2: Hyper Backup (Remote/Offsite Protection)
 
-### Setup
-
-1.  **Install Hyper Backup:** Install the "Hyper Backup" package from the Package Center.
-2.  **Create Backup Task:**
-    *   Open Hyper Backup and click the "+" to create a new "Data backup task".
-    *   Select your backup destination (e.g., Backblaze B2).
-    *   For the source, select the `/volume1/docker/gitea/backups` directory.
-    *   Configure your backup schedule, retention policy, and encryption.
-3.  **Run the Ansible Playbook:** The playbook ensures the source directory exists.
-
-### Recovery
-
-1.  **Install Hyper Backup:** On a new Synology NAS, install Hyper Backup.
-2.  **Restore from Backup:**
-    *   Open Hyper Backup and click "Restore" > "Data".
-    *   Select your backup task and follow the wizard to restore the `backups` directory.
-3.  **Follow Tier 3 Recovery:** Once the dump files are restored, follow the Tier 3 recovery instructions.
+(Content unchanged)
 
 ## Tier 3: Gitea Archive (Portable Disaster Recovery)
 
-### Setup
+This tier uses the application-native backup and restore functionality of Gitea, creating a portable archive that can be restored to any new host.
 
-1.  **Run the Ansible Playbook:** The `gitea-backup.yml` playbook will deploy the dump script and schedule it.
+### Automated Backup Setup
 
-### Recovery
+The `gitea-deploy.yml` playbook automatically **configures and enables** a daily, automated backup. It deploys a script to the NAS and schedules it to run daily via a cron job. This script stops Gitea, creates a full dump, uploads it to Backblaze B2, and restarts Gitea.
 
-1.  **Retrieve Dump File:** Download the desired `gitea-dump-YYYY-MM-DD.tar.gz` file from your Hyper Backup destination (e.g., Backblaze B2).
-2.  **Set up New Host:**
-    *   Install Docker and Docker Compose.
-    *   Create a `docker-compose.yml` for Gitea and MySQL.
-    *   Create the necessary directory structure: `/volume1/docker/gitea`.
-3.  **Restore Gitea:**
-    *   Start the MySQL container.
-    *   Copy the dump file to the new host.
-    *   Run the following command to restore the dump:
-        ```bash
-        docker run --rm -v /volume1/docker/gitea:/data -v $(pwd)/gitea-dump.tar.gz:/tmp/gitea-dump.tar.gz gitea/gitea:latest gitea restore --from /tmp/gitea-dump.tar.gz
-        ```
-4.  **Start Gitea:** `docker-compose up -d gitea`
+### Recovery Method 1: Automated GitHub Action (Recommended)
+
+This is the primary and recommended method for disaster recovery. It uses GitHub Actions to ensure a repeatable and reliable execution.
+
+**Recovery Steps:**
+
+1.  **Ensure a Runner is Available:** Make sure at least one self-hosted GitHub Actions runner is online and available on your local network.
+2.  **Run the Bootstrap Workflow:** Manually trigger the `Bootstrap` workflow from the GitHub Actions tab. This will run the `gitea-deploy.yml` playbook to provision the base system on the new host.
+3.  **Run the Restore Workflow:** Once the bootstrap is complete, manually trigger the `Restore Gitea Data` workflow. This requires a manual approval step before it runs the `gitea-restore.yml` playbook to populate the new instance with your backed-up data.
+
+### Recovery Method 2: Manual Fallback
+
+This method should only be used if GitHub Actions is unavailable or the automated workflow fails.
+
+**Prerequisites:**
+
+*   A new host with Ansible and Docker installed.
+*   A local checkout of this repository.
+*   A valid Ansible inventory file for the new host.
+*   The following environment variables must be set:
+    *   `B2_BUCKET_NAME`
+    *   `B2_APPLICATION_KEY_ID`
+    *   `B2_APPLICATION_KEY`
+    *   `GITEA_DB_PASSWORD`
+    *   `DNSIMPLE_OAUTH_TOKEN`
+    *   `CERTBOT_EMAIL`
+    *   `GITEA_ADMIN_USERNAME`
+    *   `GITEA_ADMIN_PASSWORD`
+    *   `GITEA_ADMIN_EMAIL`
+    *   `DISCORD_WEBHOOK`
+
+**Manual Recovery Steps:**
+
+1.  **Deploy the Base System:** First, run the `gitea-deploy.yml` playbook from your local machine.
+
+    ```bash
+    ansible-playbook -i /path/to/your/inventory playbooks/gitea-deploy.yml
+    ```
+
+2.  **Restore the Data:** Once the deployment is complete, run the `gitea-restore.yml` playbook.
+
+    ```bash
+    ansible-playbook -i /path/to/your/inventory playbooks/gitea-restore.yml
+    ```

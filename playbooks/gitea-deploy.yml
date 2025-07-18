@@ -105,6 +105,7 @@
         - gitea-runner
         - conf
         - conf/secrets
+        - tmp
       tags: directories
 
     - name: Create Gitea Docker network
@@ -196,6 +197,7 @@
           MYSQL_PASSWORD: "{{ gitea_db_password }}"
         volumes:
           - "{{ gitea_data_path }}/db:/var/lib/mysql"
+        command: "--character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci"
       tags: db
 
     - name: Check if internal token file exists

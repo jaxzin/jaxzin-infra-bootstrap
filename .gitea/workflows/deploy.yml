@@ -1,10 +1,12 @@
-name: Deploy on Gitea
+name: Deploy Gitea
 
 on:
   workflow_dispatch:   # trigger on every push or manual dispatch
 
 jobs:
-  call-bootstrap:
+  deploy:
+    name: Deploy Gitea Infrastructure
     uses: ./.github/workflows/common-bootstrap.yml
     with:
       dry_run: false
+    secrets: inherit
