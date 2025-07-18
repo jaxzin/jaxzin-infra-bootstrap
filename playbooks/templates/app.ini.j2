@@ -1,22 +1,28 @@
 ;; Gitea app.ini configuration, managed by Ansible
 
+WORK_PATH = /var/lib/gitea {# container path to work dir #}
+
 [server]
-PROTOCOL         = https
-DOMAIN           = {{ gitea_domain }}
-ROOT_URL         = https://{{ gitea_domain }}:{{ gitea_port }}/
-CERT_FILE        = /etc/letsencrypt/live/{{ gitea_domain }}/fullchain.pem
-KEY_FILE         = /etc/letsencrypt/live/{{ gitea_domain }}/privkey.pem
-SSH_PORT         = {{ gitea_ssh_port }}
+PROTOCOL = https
+DOMAIN = {{ gitea_domain }}
+ROOT_URL = https://{{ gitea_domain }}:{{ gitea_port }}/
+CERT_FILE = /etc/letsencrypt/live/{{ gitea_domain }}/fullchain.pem
+KEY_FILE = /etc/letsencrypt/live/{{ gitea_domain }}/privkey.pem
+SSH_PORT = {{ gitea_ssh_port }}
 
 [database]
-DB_TYPE          = mysql
-HOST             = gitea-db:3306
-NAME             = {{ gitea_db_name }}
-USER             = {{ gitea_db_user }}
-PASSWD           = {{ gitea_db_password }}
+DB_TYPE = mysql
+HOST = gitea-db:3306
+NAME = {{ gitea_db_name }}
+USER = {{ gitea_db_user }}
+PASSWD = {{ gitea_db_password }}
 
 [security]
-INSTALL_LOCK     = true
+INSTALL_LOCK = true
+INTERNAL_TOKEN_URI = file:{{ gitea_internal_token_path }}
 
 [actions]
-ENABLED=true
+ENABLED = true
+
+[oauth2]
+JWT_SECRET_URI = file:{{ gitea_jwt_secret_path }}

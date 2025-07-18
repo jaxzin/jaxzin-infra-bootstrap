@@ -51,6 +51,12 @@
     # SSL/TLS certificate management
     dsm_cert_name: nas-lan
     discord_webhook: "{{ lookup('ansible.builtin.env', 'DISCORD_WEBHOOK') }}"
+    # Internal token for Gitea API
+    gitea_internal_token_path: "{{ gitea_data_path }}/conf/internal_token"
+    gitea_internal_token: "{{ lookup('password', '/dev/null', length=32, chars='ascii_letters,digits') }}"
+    # JWT secret for Gitea OAuth2
+    gitea_jwt_secret_path: "{{ gitea_data_path }}/conf/oauth2_jwt_secret"
+    gitea_jwt_secret: "{{ lookup('password', '/dev/null', length=64, chars='ascii_letters,digits') }}"
   roles:
     - role: tafeen.synology.syno_pkg_install
       syno_pkg_name: "Container Manager"
@@ -207,6 +213,38 @@
         mode: '0640'
       notify: Restart Gitea
 
+    - name: Check if internal token file exists
+      stat:
+        path: "{{ gitea_internal_token_path }}"
+      register: internal_token_file
+
+    - name: Ensure Gitea internal token file exists
+      copy:
+        dest: "{{ gitea_internal_token_path }}"
+        content: "{{ gitea_internal_token }}"
+        owner: "1000"
+        group: "1000"
+        mode: '0600'
+        force: no  # only write if different
+      when: not internal_token_file.stat.exists
+      notify: Restart Gitea
+
+    - name: Check if JWT secret file exists
+      stat:
+        path: "{{ gitea_jwt_secret_path }}"
+      register: jwt_secret_file
+
+    - name: Ensure Gitea JWT secret file exists
+      copy:
+        dest: "{{ gitea_jwt_secret_path }}"
+        content: "{{ gitea_jwt_secret }}"
+        owner: "1000"
+        group: "1000"
+        mode: '0600'
+        force: no  # only write if different
+      when: not jwt_secret_file.stat.exists
+      notify: Restart Gitea
+
     - name: Deploy Gitea container
       # Launch the Gitea application container
       community.docker.docker_container:
@@ -325,6 +363,7 @@
       stat:
         path: "{{ gitea_data_path }}/conf/runner_token.txt"
       register: runner_token_file
+      check_mode: no # Don't skip this task in check mode
 
     - name: Load Gitea runner token from remote file if it exists
       block:
@@ -336,6 +375,7 @@
           set_fact:
             gitea_runner_token: "{{ runner_token_content.stdout | trim }}"
       when: runner_token_file.stat.exists
+      check_mode: no # Don't skip this task in check mode
 
     - name: Generate and persist Gitea runner token if it does not exist
       when: not runner_token_file.stat.exists
