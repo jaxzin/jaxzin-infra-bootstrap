@@ -17,11 +17,30 @@
             name: b2
             state: present
 
+        - name: Download manifest file
+          command: >
+            b2 download-file-by-name
+            "{{ b2_bucket_name }}"
+            latest.txt
+            /tmp/latest.txt
+          environment:
+            B2_APPLICATION_KEY_ID: "{{ b2_application_key_id }}"
+            B2_APPLICATION_KEY: "{{ b2_application_key }}"
+
+        - name: Read backup filename from manifest
+          slurp:
+            src: /tmp/latest.txt
+          register: manifest
+
+        - name: Set backup_filename fact
+          set_fact:
+            backup_filename: "{{ manifest.content | b64decode | trim }}"
+
         - name: Download backup tarball for planning
           command: >
             b2 download-file-by-name
             "{{ b2_bucket_name }}"
-            "latest-gitea-backup.tar.gz"
+            "{{ backup_filename }}"
             "/tmp/gitea-backup.tar.gz"
           environment:
             B2_APPLICATION_KEY_ID: "{{ b2_application_key_id }}"
@@ -56,11 +75,30 @@
             name: b2
             state: present
 
+        - name: Download manifest file
+          command: >
+            b2 download-file-by-name
+            "{{ b2_bucket_name }}"
+            latest.txt
+            /tmp/latest.txt
+          environment:
+            B2_APPLICATION_KEY_ID: "{{ b2_application_key_id }}"
+            B2_APPLICATION_KEY: "{{ b2_application_key }}"
+
+        - name: Read backup filename from manifest
+          slurp:
+            src: /tmp/latest.txt
+          register: manifest
+
+        - name: Set backup_filename fact
+          set_fact:
+            backup_filename: "{{ manifest.content | b64decode | trim }}"
+
         - name: Download backup archive
           command: >
             b2 download-file-by-name
             "{{ b2_bucket_name }}"
-            "latest-gitea-backup.tar.gz"
+            "{{ backup_filename }}"
             "/tmp/gitea-backup.tar.gz"
           environment:
             B2_APPLICATION_KEY_ID: "{{ b2_application_key_id }}"

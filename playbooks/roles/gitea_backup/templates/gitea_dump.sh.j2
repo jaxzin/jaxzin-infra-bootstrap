@@ -63,9 +63,15 @@ GITEA_NETWORK_NAME="{{ gitea_network_name | default('host') }}"
   echo "Uploading $DUMP_FILENAME to B2 bucket: $B2_BUCKET_NAME"
   b2 file upload "$B2_BUCKET_NAME" "$HOST_DUMP_FILE" "$DUMP_FILENAME"
 
-  # 6. Clean up the local dump file
-  echo "Removing local dump file: $HOST_DUMP_FILE"
+  # 6. Create and upload the manifest file
+  echo "Creating and uploading manifest file..."
+  echo "$DUMP_FILENAME" > "$HOST_BACKUP_DIR/latest.txt"
+  b2 file upload --no-progress "$B2_BUCKET_NAME" "$HOST_BACKUP_DIR/latest.txt" latest.txt
+
+  # 7. Clean up the local files
+  echo "Removing local files..."
   rm "$HOST_DUMP_FILE"
+  rm "$HOST_BACKUP_DIR/latest.txt"
 
   # The cleanup trap will automatically start Gitea now.
   echo "--- Gitea Dump and B2 Upload Complete: $(date) ---"
