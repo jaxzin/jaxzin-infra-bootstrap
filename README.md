@@ -13,7 +13,7 @@ The only prerequisites to performing a disaster recovery are:
 3. there is a Synology NAS available on the home network...
 4. with the hostname defined in the Github repo's secret `SSH_NAS_HOST` and...
 5. the "Container Manager" package (aka Docker) is compatible with this NAS...
-6. and there is a latest backup of the Gitea data on Backblaze in the `B2_BUCKET`
+6. and there is a latest backup of the Gitea data on Backblaze in the `B2_BUCKET_NAME`
 
 ---
 
@@ -22,14 +22,16 @@ The only prerequisites to performing a disaster recovery are:
 ```text
 .gitea/
 └── workflows/
-    └── deploy.yml            # Daily deployments via Gitea Actions
+    └── deploy.yml           # Daily deployments via Gitea Actions
 .github/
 ├── workflows/
+│   ├── bootstrap.yml        # GitHub-triggered DR bootstrap (recovery phase 1)
 │   ├── common-bootstrap.yml # Core provisioning steps (reusable)
-│   ├── bootstrap.yml        # GitHub-triggered DR bootstrap (manual phases)
-│   └── mirror-health.yml    # Daily mirror-health check + Discord alerts
-playbooks/                    # My Ansible playbooks & roles (NAS, Gitea, DNS, certs)
-inventory.ini (or hosts.yml) # Ansible inventory for my network hosts
+│   ├── health-check.yml     # Daily dry run of DR bootstrap with Discord alert
+│   ├── mirror-health.yml    # Daily mirror-health check with Discord alert
+│   └── restore.yml          # GitHub-triggered DR restore (recovery phase 2, 🛑 DANGER, overwrites Gitea data)
+playbooks/                   # My Ansible playbooks & roles (NAS, Gitea, DNS, certs)
+Makefile                     # Makefile for common tasks
 
 ### Gitea Runner
 
@@ -55,16 +57,17 @@ GitHub runner is used for disaster recovery (DR) workflows only.
 
 ```mermaid
 flowchart TB
-    subgraph Gitea_CI["Gitea"]
+    subgraph Gitea_CI["Gitea (Self-Hosted)"]
         A[Push to Gitea Repo] --> B[Gitea Actions Trigger]
         B --> C[Gitea Runner Executes Ansible]
     end
     subgraph GitHub_CI["GitHub"]
         A --> E[Push Mirror to GitHub]
         T["Daily Trigger ⏰"]
-        T --> F["Mirror-Health Check (GitHub Actions)"]
-        F -->|stale| G["Discord Alert"]
-        F -->|healthy| H["No Action"]
+        T --> F["Mirror Check"]
+        F --> G["Discord Alert"]
+        T --> H["Health Check (Dry Run)"]
+        H --> G
     end
     C --> D[Synology NAS Configuration]
 ```
@@ -72,24 +75,19 @@ flowchart TB
 ### Failure & Recovery Mode
 
 ```mermaid
-flowchart LR
-    subgraph GitHub_DR["Plan Phase"]
-        direction TB
-        X[Manual Run: plan-restore tag] --> Y[Plan job on GitHub Runner]
-        Y --> Z[Detect Overlaps]
-    end
-    subgraph Approval["Approval Gate"]
-        A[Requires manual approval if overlaps]
-    end
-    GitHub_DR --> A
-    subgraph Restore["Restore Phase"]
-        direction TB
-        R[GitHub Runner executes restore]
+flowchart TB
+    Start([Start Recovery from GitHub])
+    Start -->|manual| Action_B[[Run 'Bootstrap' Action]]
+    Action_B -->|manual| Action_R[[Run 'Restore Gitea Data' Action]]
+    subgraph Restore[Restore Gitea Data]
+        direction LR
+        Approval[Wait for Approval]
+        Approval -->|manual| R[GitHub Runner executes playbook]
         R --> M[SSH to Synology NAS]
-        M --> N[Fetch & Unarchive Backup]
+        M --> N[Fetch & Restore Backup]
         N --> P[Services Back Online]
     end
-    A --> Restore
+    Action_R -.- Restore
 ```
 
 ---
@@ -103,13 +101,31 @@ can be found in the [CONTRIBUTING.md](CONTRIBUTING.md) file.
 
 ## What You Need to Do Once
 
-### 1. DSM Certificate Import
+### 1. Initial Repository Setup
+
+This repository uses a protected GitHub Environment to provide a manual approval gate for the disaster recovery 
+workflow. This prevents accidental restores. If you have forked this repository, you **must** configure this 
+environment in your own repository settings.
+
+**Steps:**
+
+1.  Navigate to your forked repository on GitHub.
+2.  Click on the **`Settings`** tab.
+3.  In the left sidebar, click on **`Environments`**.
+4.  Click the **`New environment`** button.
+5.  For the name, enter `production-restore`.
+6.  Click the **`Configure environment`** button.
+7.  Under **Deployment protection rules**, check the box for **`Required reviewers`**.
+8.  Add your own GitHub username (or a team you belong to) as a reviewer.
+9.  Click **`Save protection rules`**.
+
+### 2. DSM Certificate Import
 
 * In DSM: **Control Panel → Security → Certificate → Add → Import**
 * Import your `nas.lan.jaxzin.com` cert and name it `nas-lan`.
 * Note `/usr/syno/etc/certificate/nas-lan` folder.
 
-### 2. Gitea CI Variables
+### 3. Gitea CI Variables
 
 In Gitea (Settings → Actions → Variables):
 
@@ -118,13 +134,19 @@ In Gitea (Settings → Actions → Variables):
 | `SSH_KEY`             | SSH private key for `admin` on NAS    |
 | `NAS_SSH_USER`        | NAS SSH user (`admin`)                |
 | `NAS_HOST`            | FQDN/IP of NAS (`nas.lan.jaxzin.com`) |
-| `B2_ACCESS_KEY`       | Backblaze B2 key ID                   |
-| `B2_SECRET_KEY`       | Backblaze B2 Secret Key               |
+| `B2_APPLICATION_KEY_ID` | Backblaze B2 Application Key ID       |
+| `B2_APPLICATION_KEY`    | Backblaze B2 Application Key          |
 | `DISCORD_WEBHOOK_URL` | Discord webhook for mirror-health     |
+| `GITEA_ADMIN_USERNAME`| Gitea Admin Username                  |
+| `GITEA_ADMIN_PASSWORD`| Gitea Admin Password                  |
+| `GITEA_ADMIN_EMAIL`   | Gitea Admin Email                     |
+| `GITEA_DB_PASSWORD`   | Gitea Database Password               |
+| `DNSIMPLE_OAUTH_TOKEN`| DNSimple OAuth Token                  |
+| `CERTBOT_EMAIL`       | Certbot Email Address                 |
 
 Ensure at least one Gitea runner (Docker) is registered and online.
 
-### 3. Gitea Admin User
+### 4. Gitea Admin User
 
 The initial Gitea administrator user is created automatically by the Ansible playbook. The credentials for this user are sourced from environment variables within your CI/CD system (e.g., Gitea Actions secrets).
 
@@ -136,18 +158,33 @@ You must define the following variables/secrets for the admin user creation to s
 | `GITEA_ADMIN_PASSWORD` | The password for the Gitea administrator. |
 | `GITEA_ADMIN_EMAIL` | The email address for the Gitea administrator. |
 
-### 4. GitHub Secrets
+### 5. GitHub Secrets
 
 In GitHub (Settings → Secrets → Actions):
 
 | Secret                | Value/Purpose              |
 | --------------------- | -------------------------- |
-| `SSH_KEY`             | Same NAS SSH key           |
-| `NAS_SSH_USER`        | Same NAS SSH user          |
-| `NAS_SSH_HOST`        | FQDN/IP of NAS             |
-| `B2_ACCESS_KEY`       | Backblaze B2 key ID        |
-| `B2_SECRET_KEY`       | Backblaze B2 Secret Key    |
-| `DISCORD_WEBHOOK_URL` | Discord webhook for alerts |
+| `SSH_KEY`             | SSH private key for NAS    |
+| `NAS_SSH_PASSWORD`    | NAS SSH user password      |
+| `B2_APPLICATION_KEY`    | Backblaze B2 Application Key    |
+| `DISCORD_WEBHOOK`     | Discord webhook for alerts |
+| `DNSIMPLE_OAUTH_TOKEN`| DNSimple OAuth Token       |
+| `GITEA_ADMIN_PASSWORD`| Gitea Admin User Password  |
+| `GITEA_DB_PASSWORD`   | Gitea Database Password    |
+
+### 6. GitHub Variables
+
+In GitHub (Settings → Variables → Actions):
+
+| Variable              | Value/Purpose              |
+| --------------------- | -------------------------- |
+| `B2_APPLICATION_KEY_ID` | Backblaze B2 Application Key ID |
+| `B2_BUCKET_NAME`      | Backblaze B2 Bucket Name   |
+| `CERTBOT_EMAIL`       | Certbot Email Address      |
+| `GITEA_ADMIN_USERNAME`| Gitea Admin Username       |
+| `GITEA_ADMIN_EMAIL`   | Gitea Admin Email          |
+| `NAS_HOST`            | FQDN/IP of NAS             |
+| `NAS_SSH_USER`        | NAS SSH user               |
 
 Register at least one self-hosted GitHub runner off the NAS, labeled `dr`.
 

@@ -5,92 +5,44 @@ on:
   workflow_dispatch:
 
 jobs:
-  plan-restore:
-    name: 1) Plan Restore
+  execute-restore:
+    name: Restore Gitea from Backup
     runs-on: self-hosted
-    outputs:
-      restore_needed: ${{ steps.plan.outcome == 'failure' }}
+    environment: production-restore # This provides a manual approval gate
     env:
-      B2_BUCKET: ${{ vars.B2_BUCKET }}
-      B2_ACCESS_KEY: ${{ secrets.B2_ACCESS_KEY }}
-      B2_SECRET_KEY: ${{ secrets.B2_SECRET_KEY }}
+      B2_BUCKET_NAME: ${{ vars.B2_BUCKET_NAME }}
+      B2_APPLICATION_KEY_ID: ${{ vars.B2_APPLICATION_KEY_ID }}
+      B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+      GITEA_DB_PASSWORD: ${{ secrets.GITEA_DB_PASSWORD }}
       NAS_HOST: ${{ vars.NAS_HOST }}
       NAS_SSH_USER: ${{ vars.NAS_SSH_USER }}
       NAS_SSH_PASSWORD: ${{ secrets.NAS_SSH_PASSWORD }}
-      SSH_KEY: ${{ secrets.SSH_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Set up Ansible in a venv if needed
+      - name: Set up Ansible
         run: |
-          if ! (command -v ansible-playbook &> /dev/null && command -v ansible-galaxy &> /dev/null); then
-            echo "Ansible not found, installing into a virtual environment..."
-            python3 --version
+          if ! (command -v ansible-playbook &> /dev/null);
+          then
+            echo "Ansible not found, installing..."
             python3 -m venv .venv
-            .venv/bin/pip install ansible==11.7.0
+            source .venv/bin/activate
+            pip install ansible
             echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
-          else
-            echo "Ansible is already available on the PATH."
           fi
 
-      - name: Plan destructive restore (no side-effects)
-        id: plan
-        continue-on-error: true
+      - name: Run Restore Playbook
         uses: dawidd6/action-ansible-playbook@v4
         with:
           playbook: gitea-restore.yml
           directory: ./playbooks
           configuration: |
             [ssh_connection]
+            pipelining = True
             ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o ControlPath=/tmp/ansible-ssh-%%h-%%p-%%r
           key: ${{ secrets.SSH_KEY }}
           inventory: |
             [nas]
             ${{ vars.NAS_HOST }} ansible_user="${{ vars.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
           requirements: galaxy-requirements.yml
-          options: >
-            --tags plan-restore
-
-      - name: Show plan result
-        if: needs.plan-restore.outputs.restore_needed == 'true'
-        run: echo "⚠️ Overlaps detected; manual approval required."
-
-  approve:
-    name: 2) Await manual approval
-    needs: plan-restore
-    if: ${{ needs.plan-restore.outputs.restore_needed == 'true' }}
-    runs-on: self-hosted
-    environment: production-restore
-    steps:
-      - run: echo "Waiting for approval to proceed with restore…"
-
-  execute-restore:
-    name: 3) Execute restore
-    needs: [plan-restore, approve]
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Ansible in a venv if needed
-        run: |
-          if ! (command -v ansible-playbook &> /dev/null && command -v ansible-galaxy &> /dev/null); then
-            echo "Ansible not found, installing into a virtual environment..."
-            python3 -m venv .venv
-            .venv/bin/pip install ansible
-            echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
-          else
-            echo "Ansible is already available on the PATH."
-          fi
-
-      - name: Execute destructive restore
-        uses: dawidd6/action-ansible-playbook@v4
-        with:
-          playbook: gitea-restore.yml
-          directory: ./playbooks
-          key: ${{ secrets.SSH_KEY }}
-          inventory: |
-            [nas]
-            ${{ vars.NAS_HOST }} ansible_user="${{ vars.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
-          requirements: galaxy-requirements.yml
-          options: >
-            --skip-tags plan-restore

@@ -1,0 +1,96 @@
+#!/bin/bash
+# Exit on error, treat unset variables as an error, and propagate exit codes through pipes.
+set -euo pipefail
+
+# --- Variables ---
+GITEA_CONTAINER_NAME="{{ gitea_container_name | default('gitea') }}"
+GITEA_USER_ID="1000" # The UID of the user inside the container
+GITEA_GROUP_ID="1000" # The GID of the user inside the container
+HOST_DATA_DIR="/volume1/docker/gitea"
+LOG_FILE="$HOST_DATA_DIR/logs/gitea-dump.log"
+HOST_TEMP_PARENT_DIR="$HOST_DATA_DIR/tmp"
+HOST_TEMP_DUMP_DIR=""
+CREDENTIALS_FILE="$HOST_DATA_DIR/scripts/b2_credentials.env"
+GITEA_IMAGE="{{ gitea_image }}"
+GITEA_DATA_VOLUME="{{ gitea_data_path }}/gitea:/var/lib/gitea"
+GITEA_APP_INI_VOLUME="{{ gitea_app_ini_path_host }}:{{ gitea_app_ini_path_container }}"
+GITEA_SECRETS_VOLUME="{{ gitea_data_path }}/conf/secrets:/etc/gitea/secrets:ro"
+GITEA_NETWORK_NAME="{{ gitea_network_name | default('host') }}"
+
+# --- Functions ---
+
+# The main cleanup function. This will always be called when the script exits.
+cleanup() {
+  echo "INFO: --- Script Finished: $(date) ---"
+  if [ -n "$HOST_TEMP_DUMP_DIR" ] && [ -d "$HOST_TEMP_DUMP_DIR" ]; then
+    echo "INFO: Cleaning up temporary directory: $HOST_TEMP_DUMP_DIR"
+    rm -rf "$HOST_TEMP_DUMP_DIR"
+  fi
+  echo "INFO: Ensuring Gitea container is started..."
+  docker start "$GITEA_CONTAINER_NAME" &>/dev/null
+}
+
+# --- Script Body ---
+
+# Redirect all stdout and stderr to the log file.
+exec >> "$LOG_FILE" 2>&1
+
+# Set the trap to call the cleanup function on any script exit.
+trap cleanup EXIT
+
+echo "--- Starting Gitea Dump and B2 Upload: $(date) ---"
+
+# 0. Source credentials
+echo "INFO: Sourcing credentials..."
+if [ -f "$CREDENTIALS_FILE" ]; then
+  source "$CREDENTIALS_FILE"
+else
+  echo "ERROR: Credentials file not found at $CREDENTIALS_FILE" >&2
+  exit 1
+fi
+
+# 1. Create a unique, temporary directory for this dump.
+HOST_TEMP_DUMP_DIR=$(mktemp -d -p "$HOST_TEMP_PARENT_DIR" backup-XXXXXX)
+echo "INFO: Created temporary directory: $HOST_TEMP_DUMP_DIR"
+
+# 2. Set correct permissions for the container user.
+echo "INFO: Setting permissions on temporary directory..."
+chown "$GITEA_USER_ID:$GITEA_GROUP_ID" "$HOST_TEMP_DUMP_DIR"
+
+# 3. Stop Gitea container
+echo "INFO: Stopping Gitea container..."
+docker stop "$GITEA_CONTAINER_NAME"
+
+# 4. Create Gitea dump
+DUMP_FILENAME="gitea-dump-$(date +%Y-%m-%d-%H%M%S).tar.gz"
+HOST_DUMP_FILE="$HOST_TEMP_DUMP_DIR/$DUMP_FILENAME"
+echo "INFO: Creating Gitea dump. Logs from the dump process will follow:"
+docker run --rm --name gitea-dump-temp --network "$GITEA_NETWORK_NAME" -u "$GITEA_USER_ID" \
+  --memory="1g" --memory-swap="1g" \
+  -v "$GITEA_DATA_VOLUME" -v "$GITEA_APP_INI_VOLUME" -v "$GITEA_SECRETS_VOLUME" -v "$HOST_TEMP_DUMP_DIR:/dump" \
+  "$GITEA_IMAGE" gitea dump --type tar.gz --file "/dump/$DUMP_FILENAME"
+DUMP_EXIT_CODE=$?
+
+if [ $DUMP_EXIT_CODE -ne 0 ]; then
+    echo "ERROR: Gitea dump command failed with exit code $DUMP_EXIT_CODE."
+    exit 1
+fi
+echo "SUCCESS: Gitea dump created."
+
+# 5. Authorize with B2
+echo "INFO: Authorizing with B2..."
+b2 account authorize "$B2_APPLICATION_KEY_ID" "$B2_APPLICATION_KEY"
+echo "SUCCESS: B2 authorization complete."
+
+# 6. Upload the file to B2
+echo "INFO: Uploading dump file to B2..."
+b2 file upload "$B2_BUCKET_NAME" "$HOST_DUMP_FILE" "$DUMP_FILENAME"
+echo "SUCCESS: File uploaded to B2."
+
+# 7. Create and upload the manifest file
+echo "INFO: Creating and uploading manifest file..."
+echo "$DUMP_FILENAME" > "$HOST_TEMP_DUMP_DIR/latest.txt"
+b2 file upload --no-progress "$B2_BUCKET_NAME" "$HOST_TEMP_DUMP_DIR/latest.txt" latest.txt
+echo "SUCCESS: Manifest uploaded."
+
+# The exit trap will now run, cleaning up the temp dir and restarting Gitea.

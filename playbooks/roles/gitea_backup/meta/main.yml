@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: Your Name
+  description: >
+    This role does not perform backups itself. Instead, it configures the native
+    Synology backup packages (like Hyper Backup and Snapshot Replication) on the
+    NAS to ensure they are backing up the correct data to the correct targets.
+  license: license (GPL-2.0-or-later, MIT, etc)
+  min_ansible_version: "2.10"
+
+dependencies: []

@@ -27,6 +27,7 @@
     # Domain and data paths
     gitea_domain: "nas.lan.jaxzin.com"
     gitea_port: "8443"
+    gitea_network_name: "gitea-net"
     gitea_ssh_port: "22222"
     gitea_data_path: "/volume1/docker/gitea"
     gitea_runner_data_path: "{{ gitea_data_path }}/gitea-runner"
@@ -50,6 +51,12 @@
     # SSL/TLS certificate management
     dsm_cert_name: nas-lan
     discord_webhook: "{{ lookup('ansible.builtin.env', 'DISCORD_WEBHOOK') }}"
+    # Internal token for Gitea API
+    gitea_secrets_path: "{{ gitea_data_path }}/conf/secrets"
+    gitea_internal_token_path: "{{ gitea_secrets_path }}/internal_token"
+    gitea_internal_token: "{{ lookup('password', '/dev/null', length=32, chars='ascii_letters,digits') }}"
+    # JWT secret for Gitea OAuth2
+    gitea_jwt_secret: "{{ lookup('password', '/dev/null', length=64, chars='ascii_letters,digits') }}"
   roles:
     - role: tafeen.synology.syno_pkg_install
       syno_pkg_name: "Container Manager"
@@ -94,21 +101,26 @@
         mode: '0755'
       loop:
         - gitea
-        - db
         - gitea-runner
-      tags: directories
+        - conf
+        - conf/secrets
+        - tmp
 
-    - name: Create conf directory for Gitea
+    # These permissions aren't required for a new installation, but are required for restoring from a
+    # backup because the restore process runs as the 'mysql' process inside the container while a new
+    # installation creates the database with the 'root' user on first execution
+    - name: Create data directory for MySQL with correct permissions
       file:
-        path: "{{ gitea_data_path }}/conf"
+        path: "{{ gitea_data_path }}/db"
         state: directory
-        owner: root
-        group: root
+        owner: "999"  # UID for the mysql user in the official container
+        group: "999"  # GID for the mysql user in the official container
         mode: '0755'
+      tags: directories
 
     - name: Create Gitea Docker network
       community.docker.docker_network:
-        name: gitea-net
+        name: "{{ gitea_network_name }}"
         state: present
 
     - name: Create scripts directory
@@ -187,7 +199,7 @@
         state: started
         restart_policy: always
         networks:
-          - name: gitea-net
+          - name: "{{ gitea_network_name }}"
         env:
           MYSQL_ROOT_PASSWORD: "{{ gitea_db_password }}"
           MYSQL_DATABASE: "{{ gitea_db_name }}"
@@ -195,7 +207,48 @@
           MYSQL_PASSWORD: "{{ gitea_db_password }}"
         volumes:
           - "{{ gitea_data_path }}/db:/var/lib/mysql"
+        command: "--character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci"
       tags: db
+
+    - name: Check if internal token file exists
+      stat:
+        path: "{{ gitea_internal_token_path }}"
+      register: internal_token_file
+
+    - name: Ensure Gitea internal token file exists
+      copy:
+        dest: "{{ gitea_internal_token_path }}"
+        content: "{{ gitea_internal_token }}"
+        owner: "1000"
+        group: "1000"
+        mode: '0600'
+        force: no  # only write if different
+      when: not internal_token_file.stat.exists
+      notify: Restart Gitea
+
+    - name: Check if app.ini exists
+      stat:
+        path: "{{ gitea_app_ini_path_host }}"
+      register: gitea_app_ini_stat
+      check_mode: no
+
+    - name: Get the existing JWT_SECRET
+      when: gitea_app_ini_stat.stat.exists
+      block:
+        - name: Extract JWT_SECRET directly from the remote app.ini
+          ansible.builtin.command:
+            cmd: "awk -F' *= *' '/^JWT_SECRET/ {print $2}' {{ gitea_app_ini_path_host }}"
+          register: gitea_jwt_secret_raw
+          changed_when: false
+          failed_when: false  # In case JWT_SECRET doesn't exist yet
+          check_mode: no
+
+        - name: Set fact for the JWT secret, handling if it's not found
+          ansible.builtin.set_fact:
+            gitea_jwt_secret: "{{ gitea_jwt_secret_raw.stdout | trim | default(omit) }}"
+          when: gitea_jwt_secret_raw is defined
+          check_mode: no
+
 
     - name: Configure Gitea app.ini
       template:
@@ -214,7 +267,7 @@
         state: started
         restart_policy: always
         networks:
-          - name: gitea-net
+          - name: "{{ gitea_network_name }}"
         env:
           USER_UID: "1000"
           USER_GID: "1000"
@@ -224,6 +277,7 @@
         volumes:
           - "{{ gitea_data_path }}/gitea:/var/lib/gitea"
           - "{{ gitea_app_ini_path_host }}:{{ gitea_app_ini_path_container }}"
+          - "{{ gitea_data_path }}/conf/secrets:/etc/gitea/secrets:ro"
           - "{{ certbot_data_path }}/certs:/etc/letsencrypt:ro"
       tags: gitea
       notify: Restart Gitea
@@ -237,36 +291,39 @@
       retries: 15          # Try 15 times
       delay: 5             # Wait 5 seconds between retries (total wait time: 75s)
       changed_when: false  # This task just checks status, it doesn't make a change
+      when: not ansible_check_mode
 
-    - name: Check if Gitea admin user exists
-      community.docker.docker_container_exec:
-        container: gitea
-        command: >
-          /bin/sh -c "
-          /app/gitea/gitea admin user list
-          --config {{ gitea_app_ini_path_container }} | grep -q '\b{{ gitea_admin_username }}\b'
-          "
-      register: admin_check
-      failed_when: admin_check.rc not in [0, 1] # Only fail on unexpected return codes
-      changed_when: false # This task is just a check, not a change
+    - block:
+      - name: Check if Gitea admin user exists
+        community.docker.docker_container_exec:
+          container: gitea
+          command: >
+            /bin/sh -c "
+            /app/gitea/gitea admin user list
+            --config {{ gitea_app_ini_path_container }} | grep -q '\b{{ gitea_admin_username }}\b'
+            "
+        register: admin_check
+        failed_when: admin_check.rc not in [0, 1] # Only fail on unexpected return codes
+        changed_when: false # This task is just a check, not a change
 
-    - debug:
-        msg: "Admin user '{{ gitea_admin_username }}' already exists: {{ admin_check.rc == 0 }}"
-        verbosity: 1
+      - debug:
+          msg: "Admin user '{{ gitea_admin_username }}' already exists: {{ admin_check.rc == 0 }}"
+          verbosity: 1
 
-    - name: Create Gitea admin user inside the container
-      community.docker.docker_container_exec:
-        container: gitea
-        command: >
-          /app/gitea/gitea admin user create
-          --config {{ gitea_app_ini_path_container }}
-          --username '{{ gitea_admin_username }}'
-          --password '{{ gitea_admin_password }}'
-          --email '{{ gitea_admin_email }}'
-          --admin
-      when: admin_check.rc != 0
-      register: admin_create
-      changed_when: admin_create.rc == 0
+      - name: Create Gitea admin user inside the container
+        community.docker.docker_container_exec:
+          container: gitea
+          command: >
+            /app/gitea/gitea admin user create
+            --config {{ gitea_app_ini_path_container }}
+            --username '{{ gitea_admin_username }}'
+            --password '{{ gitea_admin_password }}'
+            --email '{{ gitea_admin_email }}'
+            --admin
+        when: admin_check.rc != 0
+        register: admin_create
+        changed_when: admin_create.rc == 0
+      when: not ansible_check_mode
 
     - name: Check if Gitea API token is already persisted
       stat:
@@ -321,6 +378,7 @@
       stat:
         path: "{{ gitea_data_path }}/conf/runner_token.txt"
       register: runner_token_file
+      check_mode: no # Don't skip this task in check mode
 
     - name: Load Gitea runner token from remote file if it exists
       block:
@@ -332,6 +390,7 @@
           set_fact:
             gitea_runner_token: "{{ runner_token_content.stdout | trim }}"
       when: runner_token_file.stat.exists
+      check_mode: no # Don't skip this task in check mode
 
     - name: Generate and persist Gitea runner token if it does not exist
       when: not runner_token_file.stat.exists
@@ -364,7 +423,7 @@
         state: started
         restart_policy: always
         networks:
-          - name: gitea-net
+          - name: "{{ gitea_network_name }}"
         dns_opts:
           - "ndots:0"
         env:
@@ -376,7 +435,17 @@
           - "{{ gitea_runner_data_path }}:/data"
           - "/var/run/docker.sock:/var/run/docker.sock"
 
-    
+    - name: Configure Gitea Backups
+      import_role:
+        name: gitea_backup
+      become: true
+      vars:
+        # Backup configuration variables
+        b2_bucket_name: "{{ lookup('ansible.builtin.env', 'B2_BUCKET_NAME') }}"
+        b2_application_key_id: "{{ lookup('ansible.builtin.env', 'B2_APPLICATION_KEY_ID') }}"
+        b2_application_key: "{{ lookup('ansible.builtin.env', 'B2_APPLICATION_KEY') }}"
+      tags:
+        - backup_config
 
   handlers:
     - name: Restart Gitea

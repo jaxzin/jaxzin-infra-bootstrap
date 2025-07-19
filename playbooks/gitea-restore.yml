@@ -1,84 +1,144 @@
 # playbooks/gitea-restore.yml
+#
+# This playbook automates the complete disaster recovery of a Gitea instance
+# from a backup stored in a Backblaze B2 bucket. It is designed to be run
+# against a new or existing host and will restore the database, all repository
+# files, and all application data.
+#
+# The process is based on the official Gitea documentation for a rootless
+# Docker restore and is fully idempotent.
+#
 ---
-# Ansible playbook to restore Gitea on my Synology NAS
-- name: Restore Gitea on Synology NAS
+- name: Restore Gitea from Backup
   hosts: nas
   become: true
   vars:
-    gitea_data_path: "/volume1/docker/gitea"
-    # Backblaze B2 backup settings
-    b2_bucket: "{{ lookup('ansible.builtin.env','B2_ACCESS_KEY') }}"
-    b2_access_key: "{{ lookup('ansible.builtin.env','B2_ACCESS_KEY') }}"
-    b2_secret_key: "{{ lookup('ansible.builtin.env','B2_SECRET_KEY') }}"
+    gitea_container_name: gitea
+    gitea_db_container_name: gitea-db
+    gitea_base_path: "/volume1/docker/gitea"
+    gitea_restore_tmp_path: "{{ gitea_base_path }}/tmp/restore"
+    b2_bucket_name: "{{ lookup('ansible.builtin.env','B2_BUCKET_NAME') }}"
+    b2_application_key_id: "{{ lookup('ansible.builtin.env','B2_APPLICATION_KEY_ID') }}"
+    b2_application_key: "{{ lookup('ansible.builtin.env','B2_APPLICATION_KEY') }}"
+    gitea_db_name: gitea
+    gitea_db_user: gitea
+    gitea_db_password: "{{ lookup('ansible.builtin.env','GITEA_DB_PASSWORD') }}"
   tasks:
-    - block:
-        - name: Ensure B2 CLI is installed (plan-restore)
-          pip:
-            name: b2
-            state: present
-
-        - name: Download backup tarball for planning
-          command: >
-            b2 download-file-by-name
-            "{{ b2_bucket }}"
-            "latest-gitea-backup.tar.gz"
-            "/tmp/gitea-backup.tar.gz"
-          environment:
-            B2_APPLICATION_KEY_ID: "{{ b2_access_key }}"
-            B2_APPLICATION_KEY: "{{ b2_secret_key }}"
-          args:
-            creates: "/tmp/gitea-backup.tar.gz"
-
-        - name: Detect overlaps
-          shell: |
-            tar -tf /tmp/gitea-backup.tar.gz | while read f; do
-              if [ -e "{{ gitea_data_path }}/$f" ]; then
-                echo "$f"
-              fi
-            done
-          args:
-            executable: /bin/bash
-          register: overlaps
-          changed_when: false
-
-        - name: Abort on overlaps
-          fail:
-            msg: |
-              Destructive restore would overwrite these files:
-              {{ overlaps.stdout_lines | join('\n  - ') }}
-      tags: plan-restore
-
-    - name: Restore latest backup from Backblaze
-      when: not ansible_check_mode
-      block:
-        - name: Ensure B2 CLI is installed (restore)
-          pip:
-            name: b2
-            state: present
-
-        - name: Download backup archive
-          command: >
-            b2 download-file-by-name
-            "{{ b2_bucket }}"
-            "latest-gitea-backup.tar.gz"
-            "/tmp/gitea-backup.tar.gz"
-          environment:
-            B2_APPLICATION_KEY_ID: "{{ b2_access_key }}"
-            B2_APPLICATION_KEY: "{{ b2_secret_key }}"
-          args:
-            creates: "/tmp/gitea-backup.tar.gz"
-
-        - name: Extract backup
-          unarchive:
-            src: "/tmp/gitea-backup.tar.gz"
-            dest: "{{ gitea_data_path }}"
-            remote_src: yes
-          notify: Restart Gitea
-      tags: restore
-
-  handlers:
-    - name: Restart Gitea
+    # --- Preparation ---
+    - name: Stop Gitea container to prevent data corruption during restore
       community.docker.docker_container:
-        name: gitea
+        name: "{{ gitea_container_name }}"
+        state: stopped
+
+    - name: Create a robust temporary directory on the main storage volume
+      ansible.builtin.file:
+        path: "{{ gitea_restore_tmp_path }}"
+        state: directory
+        mode: '0755'
+
+    # --- Download Backup ---
+    - name: Download manifest file to find the latest backup
+      command: >
+        b2 download-file-by-name
+        "{{ b2_bucket_name }}"
+        latest.txt
+        "{{ gitea_restore_tmp_path }}/latest.txt"
+      environment:
+        B2_APPLICATION_KEY_ID: "{{ b2_application_key_id }}"
+        B2_APPLICATION_KEY: "{{ b2_application_key }}"
+
+    - name: Read backup filename from the manifest
+      slurp:
+        src: "{{ gitea_restore_tmp_path }}/latest.txt"
+      register: manifest
+
+    - name: Set backup_filename fact for use in subsequent tasks
+      set_fact:
+        backup_filename: "{{ manifest.content | b64decode | trim }}"
+
+    - name: Download the latest backup archive from B2
+      command: >
+        b2 download-file-by-name
+        "{{ b2_bucket_name }}"
+        "{{ backup_filename }}"
+        "{{ gitea_restore_tmp_path }}/{{ backup_filename }}"
+      environment:
+        B2_APPLICATION_KEY_ID: "{{ b2_application_key_id }}"
+        B2_APPLICATION_KEY: "{{ b2_application_key }}"
+      args:
+        creates: "{{ gitea_restore_tmp_path }}/{{ backup_filename }}"
+
+    - name: Extract the full backup archive on the host
+      ansible.builtin.unarchive:
+        src: "{{ gitea_restore_tmp_path }}/{{ backup_filename }}"
+        dest: "{{ gitea_restore_tmp_path }}"
+        remote_src: yes
+
+    # --- Database Restore ---
+    - name: Restore Gitea Database
+      block:
+        - name: Copy the SQL dump into the database container
+          community.docker.docker_container_copy_into:
+            container: "{{ gitea_db_container_name }}"
+            path: "{{ gitea_restore_tmp_path }}/gitea-db.sql"
+            container_path: /tmp/gitea-db.sql
+
+        - name: Import the database dump using the mysql client
+          community.docker.docker_container_exec:
+            container: "{{ gitea_db_container_name }}"
+            command: >
+              sh -c "
+                mysql -u root -p'{{ gitea_db_password }}' -e 'DROP DATABASE IF EXISTS {{ gitea_db_name }}; CREATE DATABASE {{ gitea_db_name }} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;' &&
+                mysql --default-character-set=utf8mb4 -u {{ gitea_db_user }} -p'{{ gitea_db_password }}' {{ gitea_db_name }} < /tmp/gitea-db.sql
+              "
+
+    # --- Filesystem Restore ---
+    - name: Restore Gitea Filesystem on the host
+      block:
+        - name: Restore app.ini
+          ansible.builtin.copy:
+            src: "{{ gitea_restore_tmp_path }}/app.ini"
+            dest: "{{ gitea_base_path }}/conf/app.ini"
+            remote_src: yes
+            owner: "1000"
+            group: "1000"
+            mode: '0640'
+
+        - name: Restore data files
+          ansible.builtin.copy:
+            src: "{{ gitea_restore_tmp_path }}/data/"
+            dest: "{{ gitea_base_path }}/gitea/"
+            remote_src: yes
+            owner: "1000"
+            group: "1000"
+
+        - name: Restore repositories
+          ansible.builtin.copy:
+            src: "{{ gitea_restore_tmp_path }}/repos/"
+            dest: "{{ gitea_base_path }}/gitea/gitea-repositories/"
+            remote_src: yes
+            owner: "1000"
+            group: "1000"
+
+    # --- Finalization ---
+    - name: Start Gitea container for finalization steps
+      community.docker.docker_container:
+        name: "{{ gitea_container_name }}"
         state: started
-        restart: yes
+
+    - name: Regenerate Git Hooks to ensure repository integrity
+      community.docker.docker_container_exec:
+        container: "{{ gitea_container_name }}"
+        command: "/usr/local/bin/gitea -c /etc/gitea/app.ini admin regenerate hooks"
+
+  # --- Cleanup and Restart ---
+  post_tasks:
+    - name: Clean up the temporary restore directory from the host
+      ansible.builtin.file:
+        path: "{{ gitea_restore_tmp_path }}"
+        state: absent
+
+    - name: Ensure the Gitea container is started after restore
+      community.docker.docker_container:
+        name: "{{ gitea_container_name }}"
+        state: started
