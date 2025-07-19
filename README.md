@@ -32,14 +32,7 @@ The only prerequisites to performing a disaster recovery are:
 │   └── restore.yml          # GitHub-triggered DR restore (recovery phase 2, 🛑 DANGER, overwrites Gitea data)
 playbooks/                   # My Ansible playbooks & roles (NAS, Gitea, DNS, certs)
 Makefile                     # Makefile for common tasks
-
-### Gitea Runner
-
-This bootstrap process also installs and configures a Gitea runner on the Synology NAS. This runner is responsible for 
-executing CI/CD workflows defined in your Gitea repositories for the majority of my home network's IaC. The 
-GitHub runner is used for disaster recovery (DR) workflows only.
 ```
-
 ---
 
 ## My Methodology
@@ -208,6 +201,12 @@ Use this workflow to bootstrap the disaster recovery process.
 * Runs daily.
 * Checks freshness of mirror.
 * Notifies Discord on success or failure.
+
+### Gitea Runner vs GitHub Runner
+
+This bootstrap process also installs and configures a Gitea runner on the Synology NAS. This runner is responsible for 
+executing CI/CD workflows defined in your Gitea repositories for the majority of my home network's IaC. The 
+GitHub runner is used for disaster recovery (DR) workflows only.
 
 ---
 
