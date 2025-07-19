@@ -167,6 +167,8 @@ In GitHub (Settings → Secrets → Actions):
 | `SSH_KEY`             | SSH private key for NAS    |
 | `NAS_SSH_PASSWORD`    | NAS SSH user password      |
 | `B2_APPLICATION_KEY`    | Backblaze B2 Application Key    |
+| `B2_APPLICATION_KEY_ID` | Backblaze B2 Application Key ID |
+| `B2_BUCKET_NAME`      | Backblaze B2 Bucket Name   |
 | `DISCORD_WEBHOOK`     | Discord webhook for alerts |
 | `DNSIMPLE_OAUTH_TOKEN`| DNSimple OAuth Token       |
 | `GITEA_ADMIN_PASSWORD`| Gitea Admin User Password  |
@@ -178,8 +180,6 @@ In GitHub (Settings → Variables → Actions):
 
 | Variable              | Value/Purpose              |
 | --------------------- | -------------------------- |
-| `B2_APPLICATION_KEY_ID` | Backblaze B2 Application Key ID |
-| `B2_BUCKET_NAME`      | Backblaze B2 Bucket Name   |
 | `CERTBOT_EMAIL`       | Certbot Email Address      |
 | `GITEA_ADMIN_USERNAME`| Gitea Admin Username       |
 | `GITEA_ADMIN_EMAIL`   | Gitea Admin Email          |

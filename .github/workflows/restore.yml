@@ -10,8 +10,8 @@ jobs:
     runs-on: self-hosted
     environment: production-restore # This provides a manual approval gate
     env:
-      B2_BUCKET_NAME: ${{ vars.B2_BUCKET_NAME }}
-      B2_APPLICATION_KEY_ID: ${{ vars.B2_APPLICATION_KEY_ID }}
+      B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
+      B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
       B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
       GITEA_DB_PASSWORD: ${{ secrets.GITEA_DB_PASSWORD }}
       NAS_HOST: ${{ vars.NAS_HOST }}
