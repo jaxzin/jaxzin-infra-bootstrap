@@ -145,8 +145,6 @@ In GitHub (Settings → Secrets and variables → Actions → Variables):
 | `NAS_HOST`            | FQDN/IP of NAS             |
 | `NAS_SSH_USER`        | NAS SSH user               |
 
-Register at least one self-hosted GitHub runner off the NAS, labeled `dr`.
-
 ### 3. Self-hosting a GitHub Runner
 To self-host a GitHub runner, you can follow these steps:
 1. **Create a GitHub Runner**:
