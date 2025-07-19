@@ -101,11 +101,21 @@
         mode: '0755'
       loop:
         - gitea
-        - db
         - gitea-runner
         - conf
         - conf/secrets
         - tmp
+
+    # These permissions aren't required for a new installation, but are required for restoring from a
+    # backup because the restore process runs as the 'mysql' process inside the container while a new
+    # installation creates the database with the 'root' user on first execution
+    - name: Create data directory for MySQL with correct permissions
+      file:
+        path: "{{ gitea_data_path }}/db"
+        state: directory
+        owner: "999"  # UID for the mysql user in the official container
+        group: "999"  # GID for the mysql user in the official container
+        mode: '0755'
       tags: directories
 
     - name: Create Gitea Docker network

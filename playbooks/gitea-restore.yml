@@ -68,63 +68,71 @@
       args:
         creates: "{{ gitea_restore_tmp_path }}/{{ backup_filename }}"
 
+    - name: Extract the full backup archive on the host
+      ansible.builtin.unarchive:
+        src: "{{ gitea_restore_tmp_path }}/{{ backup_filename }}"
+        dest: "{{ gitea_restore_tmp_path }}"
+        remote_src: yes
+
     # --- Database Restore ---
     - name: Restore Gitea Database
       block:
-        - name: Extract database dump from the main archive
-          unarchive:
-            src: "{{ gitea_restore_tmp_path }}/{{ backup_filename }}"
-            dest: "{{ gitea_restore_tmp_path }}"
-            list_files: yes
-            include:
-              - gitea-db.sql
-          register: db_dump_file
-
         - name: Copy the SQL dump into the database container
-          community.docker.docker_cp:
+          community.docker.docker_container_copy_into:
             container: "{{ gitea_db_container_name }}"
-            src: "{{ gitea_restore_tmp_path }}/gitea-db.sql"
-            dest: /tmp/gitea-db.sql
+            path: "{{ gitea_restore_tmp_path }}/gitea-db.sql"
+            container_path: /tmp/gitea-db.sql
 
         - name: Import the database dump using the mysql client
           community.docker.docker_container_exec:
             container: "{{ gitea_db_container_name }}"
             command: >
               sh -c "
-                mysql -u root -p'{{ gitea_db_password }}' -e 'CREATE DATABASE IF NOT EXISTS {{ gitea_db_name }} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;' &&
+                mysql -u root -p'{{ gitea_db_password }}' -e 'DROP DATABASE IF EXISTS {{ gitea_db_name }}; CREATE DATABASE {{ gitea_db_name }} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;' &&
                 mysql --default-character-set=utf8mb4 -u {{ gitea_db_user }} -p'{{ gitea_db_password }}' {{ gitea_db_name }} < /tmp/gitea-db.sql
               "
 
     # --- Filesystem Restore ---
-    - name: Restore Gitea Filesystem
+    - name: Restore Gitea Filesystem on the host
       block:
-        - name: Copy the full backup archive into the Gitea container
-          community.docker.docker_cp:
-            container: "{{ gitea_container_name }}"
-            src: "{{ gitea_restore_tmp_path }}/{{ backup_filename }}"
-            dest: "/tmp/{{ backup_filename }}"
+        - name: Restore app.ini
+          ansible.builtin.copy:
+            src: "{{ gitea_restore_tmp_path }}/app.ini"
+            dest: "{{ gitea_base_path }}/conf/app.ini"
+            remote_src: yes
+            owner: "1000"
+            group: "1000"
+            mode: '0640'
 
-        - name: Execute restore commands inside the Gitea container
-          community.docker.docker_container_exec:
-            container: "{{ gitea_container_name }}"
-            command: >
-              sh -c "
-                cd /tmp && \
-                tar -xzf {{ backup_filename }} && \
-                mv app.ini /etc/gitea/ && \
-                mv data/* /var/lib/gitea/data/ && \
-                mv repos/* /var/lib/gitea/gitea-repositories/ && \
-                chown -R 1000:1000 /etc/gitea /var/lib/gitea
-              "
+        - name: Restore data files
+          ansible.builtin.copy:
+            src: "{{ gitea_restore_tmp_path }}/data/"
+            dest: "{{ gitea_base_path }}/gitea/"
+            remote_src: yes
+            owner: "1000"
+            group: "1000"
+
+        - name: Restore repositories
+          ansible.builtin.copy:
+            src: "{{ gitea_restore_tmp_path }}/repos/"
+            dest: "{{ gitea_base_path }}/gitea/gitea-repositories/"
+            remote_src: yes
+            owner: "1000"
+            group: "1000"
 
     # --- Finalization ---
+    - name: Start Gitea container for finalization steps
+      community.docker.docker_container:
+        name: "{{ gitea_container_name }}"
+        state: started
+
     - name: Regenerate Git Hooks to ensure repository integrity
       community.docker.docker_container_exec:
         container: "{{ gitea_container_name }}"
         command: "/usr/local/bin/gitea -c /etc/gitea/app.ini admin regenerate hooks"
 
   # --- Cleanup and Restart ---
-  always:
+  post_tasks:
     - name: Clean up the temporary restore directory from the host
       ansible.builtin.file:
         path: "{{ gitea_restore_tmp_path }}"
