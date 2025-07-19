@@ -119,48 +119,9 @@ environment in your own repository settings.
 8.  Add your own GitHub username (or a team you belong to) as a reviewer.
 9.  Click **`Save protection rules`**.
 
-### 2. DSM Certificate Import
+### 2. GitHub Secrets and Variables
 
-* In DSM: **Control Panel → Security → Certificate → Add → Import**
-* Import your `nas.lan.jaxzin.com` cert and name it `nas-lan`.
-* Note `/usr/syno/etc/certificate/nas-lan` folder.
-
-### 3. Gitea CI Variables
-
-In Gitea (Settings → Actions → Variables):
-
-| Name                  | Value/Purpose                         |
-| --------------------- | ------------------------------------- |
-| `SSH_KEY`             | SSH private key for `admin` on NAS    |
-| `NAS_SSH_USER`        | NAS SSH user (`admin`)                |
-| `NAS_HOST`            | FQDN/IP of NAS (`nas.lan.jaxzin.com`) |
-| `B2_APPLICATION_KEY_ID` | Backblaze B2 Application Key ID       |
-| `B2_APPLICATION_KEY`    | Backblaze B2 Application Key          |
-| `DISCORD_WEBHOOK_URL` | Discord webhook for mirror-health     |
-| `GITEA_ADMIN_USERNAME`| Gitea Admin Username                  |
-| `GITEA_ADMIN_PASSWORD`| Gitea Admin Password                  |
-| `GITEA_ADMIN_EMAIL`   | Gitea Admin Email                     |
-| `GITEA_DB_PASSWORD`   | Gitea Database Password               |
-| `DNSIMPLE_OAUTH_TOKEN`| DNSimple OAuth Token                  |
-| `CERTBOT_EMAIL`       | Certbot Email Address                 |
-
-Ensure at least one Gitea runner (Docker) is registered and online.
-
-### 4. Gitea Admin User
-
-The initial Gitea administrator user is created automatically by the Ansible playbook. The credentials for this user are sourced from environment variables within your CI/CD system (e.g., Gitea Actions secrets).
-
-You must define the following variables/secrets for the admin user creation to succeed:
-
-| Name | Value/Purpose |
-| --- | --- |
-| `GITEA_ADMIN_USERNAME` | The desired username for the Gitea administrator. |
-| `GITEA_ADMIN_PASSWORD` | The password for the Gitea administrator. |
-| `GITEA_ADMIN_EMAIL` | The email address for the Gitea administrator. |
-
-### 5. GitHub Secrets
-
-In GitHub (Settings → Secrets → Actions):
+In GitHub (Settings → Secrets and variables → Actions → Secrets):
 
 | Secret                | Value/Purpose              |
 | --------------------- | -------------------------- |
@@ -174,9 +135,7 @@ In GitHub (Settings → Secrets → Actions):
 | `GITEA_ADMIN_PASSWORD`| Gitea Admin User Password  |
 | `GITEA_DB_PASSWORD`   | Gitea Database Password    |
 
-### 6. GitHub Variables
-
-In GitHub (Settings → Variables → Actions):
+In GitHub (Settings → Secrets and variables → Actions → Variables):
 
 | Variable              | Value/Purpose              |
 | --------------------- | -------------------------- |
@@ -188,52 +147,79 @@ In GitHub (Settings → Variables → Actions):
 
 Register at least one self-hosted GitHub runner off the NAS, labeled `dr`.
 
+### 3. Self-hosting a GitHub Runner
+To self-host a GitHub runner, you can follow these steps:
+1. **Create a GitHub Runner**:
+   - Go to your repository on GitHub.
+   - Click on **Settings** → **Actions** → **Runners**.
+   - Click on **New self-hosted runner**.
+   - Follow the instructions to download and configure the runner.
+
+It's recommended to use a machine that is not the NAS, such as a laptop or desktop that can SSH into the NAS.
+That way in case of a disaster with the NAS you won't need to setup the runner again.
+
+### 4. Self-hosting the Bootstrap repository
+After running the Bootstrap setup for the first time, Gitea will be running.
+To then begin self-hosting the bootstrap CI/CD, you can follow these steps:
+#### 4.1. **Mirror the Repository to Gitea**:
+   - Go to your Gitea instance.
+   - Select **New Migration**.
+   - Select **GitHub**.
+   - Enter the URL of this GitHub repository.
+   - Do not choose "This repository will be a mirror", we will connect it as a push mirror later.
+   - Click **Migrate Repository**.
+#### 4.2. **Set Up Push Mirror**:
+    - Go to the newly created repository in Gitea.
+    - Click on **Settings** → **Mirroring**.
+    - Under **Push Mirror**, enter the URL of this GitHub repository.
+    - Enter your GitHub username and a personal access token with `repo` and `workflow` scope. `workflow` scope is needed to allow the push mirror to push up workflow file changes.
+    - Click **Add Mirror**.
+#### 4.3. **Configure Gitea Secrets and Variables**:
+   - Go to **Settings** → **Actions** in Gitea.
+   - Add the same secrets and variables as you did for GitHub (see above).
 ---
 
 ## Workflow Details
 
-### Daily Gitea Workflow (`.gitea/workflows/deploy.yml`)
+### Gitea Only
+#### Daily Gitea Workflow (`.gitea/workflows/deploy.yml`)
+
+Use this workflow to deploy changes to your Gitea instance daily.
 
 * Runs on push.
-* Calls `common-bootstrap.yml` with `dry_run=false`.
 
-### Common Bootstrap (`.github/workflows/common-bootstrap.yml`)
+### GitHub Only
+#### Bootstrap (`.github/workflows/bootstrap.yml`)
 
-* Reusable steps: checkout, SSH setup, run Ansible.
-* Input: `dry_run`.
-
-### Bootstrap (`.github/workflows/bootstrap.yml`)
+Use this workflow to bootstrap the disaster recovery process.
 
 * Manually triggered.
-* Calls `common-bootstrap.yml` with `dry_run=false` to provision the infrastructure.
 
-### Restore (`.github/workflows/restore.yml`)
+#### Restore (`.github/workflows/restore.yml`)
 
 * Manually triggered.
-* **Plan Restore job** uses `--tags plan-restore` to detect overlaps and exits non-zero if found.
-* **Approval job** gated on overlaps and requires manual approval (protected env).
-* **Execute Restore job** runs `gitea-restore.yml` to restore Gitea data from backup.
+* Gated by the `production-restore` environment to prevent accidental restores.
 
 ### Health Check (`.github/workflows/health-check.yml`)
 
-* Daily.
-* Calls `common-bootstrap.yml` with `dry_run=true`.
+* Runs daily.
 * Notifies Discord on success or failure.
 
 ### Mirror-Health Check (`.github/workflows/mirror-health.yml`)
 
-* Daily.
-* Checks freshness of mirror and uses `Ilshidur/action-discord@v2` for alerts.
+* Runs daily.
+* Checks freshness of mirror.
+* Notifies Discord on success or failure.
 
 ---
 
-## Performing Recovery from GitHub
+## Performing Disaster Recovery from GitHub
 
-1. Provision replacement NAS and point DNS.
-2. Ensure off-NAS runner `dr` can SSH in.
-3. On GitHub, run **Plan** step via Actions → Bootstrap; review overlaps.
+1. Provision replacement NAS with host name is `nas`.
+2. Ensure off-NAS GitHub runner can SSH in.
+3. On GitHub, run Actions → Bootstrap; then Actions → Restore Gitea Data.
 4. Approve if safe.
-5. Restore automatically runs, unarchiving backup and restarting services.
+5. Restore then automatically runs, unarchiving backup and restarting services.
 
 ---
 
