@@ -1,11 +1,28 @@
 ---
 galaxy_info:
-  author: Your Name
-  description: >
-    This role does not perform backups itself. Instead, it configures the native
-    Synology backup packages (like Hyper Backup and Snapshot Replication) on the
-    NAS to ensure they are backing up the correct data to the correct targets.
-  license: license (GPL-2.0-or-later, MIT, etc)
-  min_ansible_version: "2.10"
+  author: Brian R. Jackson
+  description: A role to configure automated backups of Gitea to a Backblaze B2 bucket.
+  license: MIT
+  min_ansible_version: "2.12"
+  platforms:
+    - name: GenericLinux
+      versions:
+        - all
 
-dependencies: []
+argument_specs:
+  main:
+    short_description: The main entry point for the gitea_backup role.
+    options:
+      b2_bucket_name:
+        type: "str"
+        required: true
+        description: The name of the Backblaze B2 bucket to upload backups to.
+      b2_application_key_id:
+        type: "str"
+        required: true
+        description: The ID of the Backblaze B2 application key.
+      b2_application_key:
+        type: "str"
+        required: true
+        description: The Backblaze B2 application key secret.
+        no_log: true

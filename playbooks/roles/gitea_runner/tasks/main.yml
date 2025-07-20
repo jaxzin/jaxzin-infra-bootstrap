@@ -1,0 +1,61 @@
+---
+- name: Check if Gitea runner token is already persisted
+  stat:
+    path: "{{ gitea_data_path }}/conf/runner_token.txt"
+  register: runner_token_file
+  check_mode: no # Don't skip this task in check mode
+
+- name: Load Gitea runner token from remote file if it exists
+  block:
+    - name: Read Gitea runner token from remote file
+      command: "cat {{ gitea_data_path }}/conf/runner_token.txt"
+      register: runner_token_content
+      changed_when: false
+    - name: Set Gitea runner token fact
+      set_fact:
+        gitea_runner_token: "{{ runner_token_content.stdout | trim }}"
+  when: runner_token_file.stat.exists
+  check_mode: no # Don't skip this task in check mode
+
+- name: Generate and persist Gitea runner token if it does not exist
+  when: not runner_token_file.stat.exists
+  block:
+    - name: Get Gitea runner registration token
+      uri:
+        url: "https://{{ gitea_domain }}:{{ gitea_port }}/api/v1/admin/runners/registration-token"
+        method: GET
+        headers:
+          Authorization: "token {{ gitea_api_token }}"
+        validate_certs: no
+      register: new_runner_token_result
+
+    - name: Set runner token fact from new token
+      set_fact:
+        gitea_runner_token: "{{ new_runner_token_result.json.token }}"
+
+    - name: Persist the new runner token to the filesystem
+      copy:
+        content: "{{ gitea_runner_token }}"
+        dest: "{{ gitea_data_path }}/conf/runner_token.txt"
+        owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+        group: "users"
+        mode: '0600'
+
+- name: Deploy Gitea runner container
+  community.docker.docker_container:
+    name: gitea-runner
+    image: "{{ gitea_runner_image }}"
+    state: started
+    restart_policy: always
+    networks:
+      - name: "{{ gitea_network_name }}"
+    dns_opts:
+      - "ndots:0"
+    env:
+      GITEA_INSTANCE_URL: "https://{{ gitea_domain }}:{{ gitea_port }}"
+      GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
+      GITEA_RUNNER_NAME: "nas-runner"
+      GITEA_RUNNER_LABELS: "docker,linux,amd64"
+    volumes:
+      - "{{ gitea_runner_data_path }}:/data"
+      - "/var/run/docker.sock:/var/run/docker.sock"

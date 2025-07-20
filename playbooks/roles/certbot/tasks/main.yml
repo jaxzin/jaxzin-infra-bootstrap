@@ -1,0 +1,68 @@
+---
+- name: Create scripts directory
+  file:
+    path: "{{ certbot_data_path }}/scripts"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create shared certs directory
+  file:
+    path: "{{ certbot_data_path }}/certs"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create certbot conf directory
+  file:
+    path: "{{ certbot_data_path }}/conf"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Template dnsimple.ini for certbot
+  template:
+    src: dnsimple.ini.j2
+    dest: "{{ certbot_data_path }}/certs/dnsimple.ini"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Create DNSimple environment file
+  copy:
+    content: |
+      #!/bin/bash
+      export DNSIMPLE_OAUTH_TOKEN="{{ dnsimple_oauth_token }}"
+      export DNSIMPLE_ENDPOINT="{{ dnsimple_endpoint }}"
+    dest: "{{ certbot_data_path }}/dnsimple_env.sh"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Template the renew-cert script
+  template:
+    src: renew-cert.sh.j2
+    dest: "{{ certbot_data_path }}/scripts/renew-cert.sh"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Run initial certificate acquisition
+  command: "{{ certbot_data_path }}/scripts/renew-cert.sh"
+  args:
+    creates: "{{ certbot_data_path }}/certs/live/{{ gitea_domain }}/fullchain.pem"
+  environment:
+    DNSIMPLE_OAUTH_TOKEN: "{{ dnsimple_oauth_token }}"
+    DNSIMPLE_ENDPOINT: "{{ dnsimple_endpoint }}"
+
+- name: Schedule daily certificate renewal
+  ansible.builtin.import_role:
+    name: tafeen.synology.syno_crontab
+  vars:
+    minute: "0"
+    hour: "3"
+    user: "root"
+    job: "{{ certbot_data_path }}/scripts/renew-cert.sh > /dev/null 2>&1"
