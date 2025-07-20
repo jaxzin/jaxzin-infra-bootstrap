@@ -16,7 +16,7 @@ This tier uses the application-native backup and restore functionality of Gitea,
 
 ### Automated Backup Setup
 
-The `gitea-deploy.yml` playbook automatically **configures and enables** a daily, automated backup. It deploys a script to the NAS and schedules it to run daily via a cron job. This script stops Gitea, creates a full dump, uploads it to Backblaze B2, and restarts Gitea.
+The `gitea-deploy.yml` playbook automatically **configures and enables** a daily, automated backup. It deploys a script to the NAS and schedules it to run daily via a cron job. This script stops Gitea, creates a full dump, uploads it to Backblaze B2, and restarts Gitea. The playbook also deploys Certbot for SSL certificate management and a Gitea runner for CI/CD.
 
 ### Recovery Method 1: Automated GitHub Action (Recommended)
 

@@ -1,0 +1,37 @@
+---
+galaxy_info:
+  author: Brian R. Jackson
+  description: A role to deploy and manage the Gitea runner.
+  license: MIT
+  min_ansible_version: "2.12"
+  platforms:
+    - name: GenericLinux
+      versions:
+        - all
+
+argument_specs:
+  main:
+    short_description: The main entry point for the gitea_runner role.
+    options:
+      gitea_data_path:
+        type: "str"
+        required: true
+      gitea_domain:
+        type: "str"
+        required: true
+      gitea_port:
+        type: "str"
+        required: true
+      gitea_api_token:
+        type: "str"
+        required: true
+        no_log: true
+      gitea_runner_image:
+        type: "str"
+        required: true
+      gitea_network_name:
+        type: "str"
+        required: true
+      gitea_runner_data_path:
+        type: "str"
+        required: true

@@ -1,0 +1,76 @@
+---
+galaxy_info:
+  author: Brian R. Jackson
+  description: A role to deploy and manage the Gitea server and its database.
+  license: MIT
+  min_ansible_version: "2.12"
+  platforms:
+    - name: GenericLinux
+      versions:
+        - all
+
+argument_specs:
+  main:
+    short_description: The main entry point for the gitea_server role.
+    options:
+      gitea_data_path:
+        type: "str"
+        required: true
+      gitea_network_name:
+        type: "str"
+        required: true
+      gitea_db_image:
+        type: "str"
+        required: true
+      gitea_db_password:
+        type: "str"
+        required: true
+        no_log: true
+      gitea_db_name:
+        type: "str"
+        required: true
+      gitea_db_user:
+        type: "str"
+        required: true
+      gitea_internal_token_path:
+        type: "str"
+        required: true
+      gitea_internal_token:
+        type: "str"
+        required: true
+        no_log: true
+      gitea_app_ini_path_host:
+        type: "str"
+        required: true
+      gitea_jwt_secret:
+        type: "str"
+        required: true
+        no_log: true
+      gitea_image:
+        type: "str"
+        required: true
+      gitea_port:
+        type: "str"
+        required: true
+      gitea_ssh_port:
+        type: "str"
+        required: true
+      gitea_app_ini_path_container:
+        type: "str"
+        required: true
+      certbot_data_path:
+        type: "str"
+        required: true
+      gitea_admin_username:
+        type: "str"
+        required: true
+      gitea_admin_password:
+        type: "str"
+        required: true
+        no_log: true
+      gitea_admin_email:
+        type: "str"
+        required: true
+      gitea_domain:
+        type: "str"
+        required: true

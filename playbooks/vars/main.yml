@@ -1,0 +1,46 @@
+---
+dnsimple_oauth_token: "{{ lookup('ansible.builtin.env', 'DNSIMPLE_OAUTH_TOKEN') }}"
+dnsimple_endpoint: "{{ lookup('ansible.builtin.env', 'DNSIMPLE_ENDPOINT') | default('https://api.dnsimple.com', true) }}"
+certbot_email: "{{ lookup('ansible.builtin.env', 'CERTBOT_EMAIL') }}"
+certbot_command_args: [
+  "certonly",
+  "--dns-dnsimple",
+  "-d", "{{ gitea_domain }}",
+  "--email", "{{ certbot_email }}",
+  "--agree-tos",
+  "--no-eff-email",
+  "--server", "https://acme-v02.api.letsencrypt.org/directory"
+]
+# Domain and data paths
+gitea_domain: "nas.lan.jaxzin.com"
+gitea_port: "8443"
+gitea_network_name: "gitea-net"
+gitea_ssh_port: "22222"
+gitea_data_path: "/volume1/docker/gitea"
+gitea_runner_data_path: "{{ gitea_data_path }}/gitea-runner"
+certbot_data_path: "/volume1/docker/certbot"
+# Gitea configuration paths
+gitea_app_ini_path_host: "{{ gitea_data_path }}/conf/app.ini"
+gitea_app_ini_path_container: "/etc/gitea/app.ini"
+# Docker images
+gitea_image_tag: "1.24.2-rootless"
+gitea_image: "gitea/gitea:{{ gitea_image_tag }}"
+gitea_db_image: "mysql:8"
+gitea_runner_image_tag: "0.2.12"
+gitea_runner_image: "gitea/act_runner:{{ gitea_runner_image_tag }}"
+# Database credentials (from environment)
+gitea_db_name: "gitea"
+gitea_db_user: "gitea"
+gitea_db_password: "{{ lookup('ansible.builtin.env','GITEA_DB_PASSWORD') }}"
+gitea_admin_username: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_USERNAME') }}"
+gitea_admin_password: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_PASSWORD') }}"
+gitea_admin_email: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_EMAIL') }}"
+# SSL/TLS certificate management
+dsm_cert_name: nas-lan
+discord_webhook: "{{ lookup('ansible.builtin.env', 'DISCORD_WEBHOOK') }}"
+# Internal token for Gitea API
+gitea_secrets_path: "{{ gitea_data_path }}/conf/secrets"
+gitea_internal_token_path: "{{ gitea_secrets_path }}/internal_token"
+gitea_internal_token: "{{ lookup('password', '/dev/null', length=32, chars='ascii_letters,digits') }}"
+# JWT secret for Gitea OAuth2
+gitea_jwt_secret: "{{ lookup('password', '/dev/null', length=64, chars='ascii_letters,digits') }}"
