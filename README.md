@@ -63,6 +63,9 @@ flowchart TB
         H --> G
     end
     C --> D[Synology NAS Configuration]
+    D --> D1[Gitea Server]
+    D --> D2[Certbot]
+    D --> D3[Gitea Runner]
 ```
 
 ### Failure & Recovery Mode
@@ -79,6 +82,9 @@ flowchart TB
         R --> M[SSH to Synology NAS]
         M --> N[Fetch & Restore Backup]
         N --> P[Services Back Online]
+        P --> P1[Gitea Server]
+        P --> P2[Certbot]
+        P --> P3[Gitea Runner]
     end
     Action_R -.- Restore
 ```
@@ -206,7 +212,7 @@ Use this workflow to bootstrap the disaster recovery process.
 
 This bootstrap process also installs and configures a Gitea runner on the Synology NAS. This runner is responsible for 
 executing CI/CD workflows defined in your Gitea repositories for the majority of my home network's IaC. The 
-GitHub runner is used for disaster recovery (DR) workflows only.
+GitHub runner is used for disaster recovery (DR) workflows only. The Gitea server, Certbot, and Gitea runner are all deployed as Docker containers.
 
 ---
 
