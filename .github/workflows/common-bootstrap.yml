@@ -10,6 +10,8 @@ on:
 jobs:
   bootstrap:
     runs-on: self-hosted
+    container:
+      image: ghcr.io/jaxzin/jaxzin-infra-bootstrap/jaxzin-infra-runner:latest
     env:
       CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
