@@ -20,7 +20,7 @@ RUNNER_LABELS="${RUNNER_LABELS:-linux,self-hosted}"
 if [[ -z "${GITHUB_TOKEN:-}" ]]; then
   echo "This script requires a runner registration token from GitHub."
   echo "Please generate a new one for this repository by visiting the following URL:"
-  echo "https://github.com/jaxzin/jaxzin-infra-bootstrap/settings/actions/runners/new"
+  echo "$REPO_URL/settings/actions/runners/new"
   echo ""
   echo "After generating the token on that page, paste it here."
   read -sp "Please enter your GitHub registration token: " GITHUB_TOKEN
