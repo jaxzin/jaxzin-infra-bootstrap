@@ -57,4 +57,6 @@ echo "Installing systemd service..."
 sudo ./svc.sh install
 sudo ./svc.sh start
 
-echo "Runner installation complete. Use 'systemctl status actions.runner.*' to verify."
+echo "Runner installation complete."
+echo "   - Use \"systemctl status actions.runner.*\" to verify."
+echo "   - Use \"journalctl -u 'actions.runner.*' -f\" to view live logs."
