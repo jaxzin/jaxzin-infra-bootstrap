@@ -4,9 +4,13 @@
   connection: local
   gather_facts: false
   tasks:
+    - name: Get all controller environment variables
+      command: env
+      register: controller_env_output
+
     - name: Display all controller environment variables
       debug:
-        var: ansible_env
+        var: controller_env_output.stdout_lines
 
 - name: Deploy Gitea, Runner, and Certbot
   hosts: nas
