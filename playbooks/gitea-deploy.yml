@@ -47,9 +47,15 @@
       include_role:
         name: gitea_server
 
+    - name: Detect if running in Gitea
+      set_fact:
+        in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_INSTANCE_URL') != '' }}"
+
+    # only install the Gitea runner if bootstrapping the server from GitHub
     - name: Include gitea_runner role
       include_role:
         name: gitea_runner
+      when: not in_gitea
 
     - name: Configure Gitea Backups
       # NOTE: This is a static import, not an include.
