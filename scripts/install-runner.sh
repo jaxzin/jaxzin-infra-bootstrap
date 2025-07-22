@@ -13,8 +13,9 @@ read -p "Enter the runner OS and architecture [linux-x64]: " RUNNER_OS_ARCH
 RUNNER_OS_ARCH="${RUNNER_OS_ARCH:-linux-x64}"
 RUNNER_ARCHIVE="actions-runner-${RUNNER_OS_ARCH}-${RUNNER_VERSION}.tar.gz"
 RUNNER_DOWNLOAD="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_ARCHIVE}"
-read -p "Enter a comma-separated list of labels [linux,self-hosted]: " RUNNER_LABELS
-RUNNER_LABELS="${RUNNER_LABELS:-linux,self-hosted}"
+
+echo "GitHub automatically adds 'self-hosted', OS, and architecture labels (e.g., 'linux', 'x64')."
+read -p "Enter a comma-separated list of any additional custom labels (e.g. gpu,docker), or press Enter for none: " RUNNER_LABELS
 
 # === Pre-checks ===
 if [[ -z "${GITHUB_TOKEN:-}" ]]; then
@@ -49,7 +50,7 @@ echo "Configuring runner..."
   --url "$REPO_URL" \
   --token "$GITHUB_TOKEN" \
   --name "$RUNNER_NAME" \
-  --labels "$RUNNER_LABELS" \
+  ${RUNNER_LABELS:+--labels "$RUNNER_LABELS"} \
   --unattended
 
 echo "Installing systemd service..."
