@@ -9,7 +9,7 @@ on:
 
 jobs:
   bootstrap:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux]
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
     env:
