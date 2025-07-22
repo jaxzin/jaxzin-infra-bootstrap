@@ -1,17 +1,4 @@
 ---
-- name: Debug Controller Environment
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  tasks:
-    - name: Get all controller environment variables
-      command: env
-      register: controller_env_output
-
-    - name: Display all controller environment variables
-      debug:
-        var: controller_env_output.stdout_lines
-
 - name: Deploy Gitea, Runner, and Certbot
   hosts: nas
   become: true
@@ -65,15 +52,7 @@
 
     - name: Detect if running in Gitea
       set_fact:
-        in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_WORKFLOW_ID', default='') != '' }}"
-
-    - name: Debug GITEA_WORKFLOW_ID
-      debug:
-        var: lookup('ansible.builtin.env', 'GITEA_WORKFLOW_ID', default='NOT_SET')
-
-    - name: Debug in_gitea
-      debug:
-        var: in_gitea
+        in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true' }}"
 
     # only install the Gitea runner if bootstrapping the server from GitHub
     - name: Include gitea_runner role
