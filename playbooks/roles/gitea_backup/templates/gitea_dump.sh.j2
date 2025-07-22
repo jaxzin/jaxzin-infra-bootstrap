@@ -2,6 +2,9 @@
 # Exit on error, treat unset variables as an error, and propagate exit codes through pipes.
 set -euo pipefail
 
+# Set the PATH to ensure Docker is found, based on interactive shell on Synology NAS
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/syno/sbin:/usr/syno/bin:/usr/local/sbin:/usr/local/bin
+
 # --- Variables ---
 GITEA_CONTAINER_NAME="{{ gitea_container_name | default('gitea') }}"
 GITEA_USER_ID="1000" # The UID of the user inside the container
