@@ -51,6 +51,14 @@
       set_fact:
         in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_WORKFLOW_ID', default='') != '' }}"
 
+    - name: Debug GITEA_WORKFLOW_ID
+      debug:
+        var: lookup('ansible.builtin.env', 'GITEA_WORKFLOW_ID', default='NOT_SET')
+
+    - name: Debug in_gitea
+      debug:
+        var: in_gitea
+
     # only install the Gitea runner if bootstrapping the server from GitHub
     - name: Include gitea_runner role
       include_role:
