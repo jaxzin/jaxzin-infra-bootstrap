@@ -49,7 +49,7 @@
 
     - name: Detect if running in Gitea
       set_fact:
-        in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_INSTANCE_URL') != '' }}"
+        in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_WORKFLOW_ID', default='') != '' }}"
 
     # only install the Gitea runner if bootstrapping the server from GitHub
     - name: Include gitea_runner role
