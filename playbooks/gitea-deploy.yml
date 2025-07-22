@@ -1,4 +1,13 @@
 ---
+- name: Debug Controller Environment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Display all controller environment variables
+      debug:
+        var: ansible_env
+
 - name: Deploy Gitea, Runner, and Certbot
   hosts: nas
   become: true
