@@ -9,15 +9,17 @@ on:
 
 jobs:
   bootstrap:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux]
+    container:
+      image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
     env:
       CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       DNSIMPLE_OAUTH_TOKEN: ${{ secrets.DNSIMPLE_OAUTH_TOKEN }}
-      GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
-      GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
-      GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
-      GITEA_DB_PASSWORD: ${{ secrets.GITEA_DB_PASSWORD }}
+      GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME || vars.MYGITEA_ADMIN_USERNAME }}
+      GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD || secrets.MYGITEA_ADMIN_PASSWORD }}
+      GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL || vars.MYGITEA_ADMIN_EMAIL }}
+      GITEA_DB_PASSWORD: ${{ secrets.GITEA_DB_PASSWORD || secrets.MYGITEA_DB_PASSWORD }}
       GITEA_RESTORE: ${{ inputs.recover }}
       B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
       B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}

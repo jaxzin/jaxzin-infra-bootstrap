@@ -145,15 +145,20 @@ In GitHub (Settings → Secrets and variables → Actions → Variables):
 | `NAS_SSH_USER`        | NAS SSH user               |
 
 ### 3. Self-hosting a GitHub Runner
-To self-host a GitHub runner, you can follow these steps:
-1. **Create a GitHub Runner**:
-   - Go to your repository on GitHub.
-   - Click on **Settings** → **Actions** → **Runners**.
-   - Click on **New self-hosted runner**.
-   - Follow the instructions to download and configure the runner.
 
-It's recommended to use a machine that is not the NAS, such as a laptop or desktop that can SSH into the NAS.
-That way in case of a disaster with the NAS you won't need to setup the runner again.
+A self-hosted GitHub runner is required to execute the disaster recovery workflows from GitHub. This runner must be on 
+a Linux machine with Docker installed, as the bootstrap process uses a container, a feature not supported by GitHub 
+runners on macOS or Windows. This process has been tested on Ubuntu 24.
+
+You can set up a self-hosted runner using the provided `install-runner.sh` script. It's recommended to run this on a 
+machine separate from your NAS to ensure you can still trigger recovery even if the NAS is unavailable.
+
+To install the runner, execute the following command in your terminal. The script will prompt you for a name for the 
+runner and a GitHub registration token for the new runner.
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/jaxzin/jaxzin-infra-bootstrap/main/scripts/install-runner.sh)"
+```
 
 ### 4. Self-hosting the Bootstrap repository
 After running the Bootstrap setup for the first time, Gitea will be running.

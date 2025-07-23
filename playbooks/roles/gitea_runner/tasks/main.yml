@@ -55,7 +55,7 @@
       GITEA_INSTANCE_URL: "https://{{ gitea_domain }}:{{ gitea_port }}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
       GITEA_RUNNER_NAME: "nas-runner"
-      GITEA_RUNNER_LABELS: "docker,linux,amd64"
+      GITEA_RUNNER_LABELS: "docker,linux,amd64,synology_dsm,self-hosted"
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
       - "/var/run/docker.sock:/var/run/docker.sock"
