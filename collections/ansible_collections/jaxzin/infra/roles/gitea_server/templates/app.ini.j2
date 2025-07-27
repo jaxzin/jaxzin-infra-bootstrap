@@ -2,11 +2,16 @@
 WORK_PATH = /var/lib/gitea
 
 [server]
-PROTOCOL = https
+PROTOCOL = {{ gitea_protocol }}
+HTTP_PORT = {{ gitea_port_container }}
 DOMAIN = {{ gitea_domain }}
 ROOT_URL = https://{{ gitea_domain }}:{{ gitea_port }}/
+# only set up TLS certificate if using HTTPS
+{% if gitea_protocol == 'https' %}
+USE_TLS = true
 CERT_FILE = /etc/letsencrypt/live/{{ gitea_domain }}/fullchain.pem
 KEY_FILE = /etc/letsencrypt/live/{{ gitea_domain }}/privkey.pem
+{% endif %}
 SSH_PORT = {{ gitea_ssh_port }}
 
 [database]

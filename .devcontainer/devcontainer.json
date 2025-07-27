@@ -1,0 +1,75 @@
+// To fully customize your devcontainer, see https://containers.dev/implementors/json_reference
+{
+  "name": "Ansible Development",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+        "python.terminal.activateEnvironment": true
+      },
+      "extensions": [
+        "ms-azuretools.vscode-docker",
+        "redhat.ansible",
+        "ms-python.python"
+      ]
+    },
+    "jetbrains": {
+      "backend": "IntelliJ",
+      "settings": {
+        // IDE settings can be added via “Show context actions”|“Add currently modified settings from IDE”
+        // A complete list of supported settings is also available through auto-completion
+        "com.intellij:app:VcsApplicationSettings.detect_patch_on_the_fly": true,
+        "Git4Idea:app:Git-Application-Settings.use_credential_helper": true,
+        "com.intellij:app:UsageViewSettings.group_by_file_structure": false,
+        "com.intellij:app:UsageViewSettings.group_by_module": false,
+        "com.intellij:app:UsageViewSettings.group_by_package": false,
+        "com.intellij:app:UsageViewSettings.group_by_usage_type": false
+      },
+      "plugins": [
+        // A set of plugin IDs.
+        // Plugin ID can be found on the corresponding plugin’s page at https://plugins.jetbrains.com.
+        "org.intellij.plugins.ansible",
+        "com.intellij.docker",
+        "org.jetbrains.plugins.yaml",
+        "mobi.hsz.idea.gitignore",
+        "cucumber-java",
+        "gherkin",
+        "org.jetbrains.completion.full.line",
+        "org.jetbrains.plugins.github",
+        "com.github.copilot",
+        "name.kropp.intellij.makefile",
+        "com.intellij.mermaid",
+        "Pythonid",
+        "PythonCore",
+        "de.achimonline.ansible_lint"
+      ]
+    }
+  },
+
+  "features": {
+    "ghcr.io/devcontainers/features/git": {},
+    // This is the correct feature for the Docker-out-of-Docker pattern.
+    // It installs the Docker CLI and handles socket permissions automatically.
+    "ghcr.io/devcontainers/features/docker-from-docker:1": {
+      "version": "latest"
+    },
+    // This feature provides make, git, rsync, and other common tools.
+    // The base image already has git, but this feature ensures it's configured.
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installMake": true,
+      "installRsync": true,
+      "username": "vscode",
+      "upgradePackages": true
+    }
+  },
+
+  "postCreateCommand": ".devcontainer/post-create.sh",
+}

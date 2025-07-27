@@ -1,0 +1,31 @@
+[project]
+name = "jaxzin-infra-bootstrap"
+requires-python = ">=3.13"
+dependencies = [
+    "ansible",
+    "ansible-lint",
+    "yamllint",
+    "molecule",
+    "molecule-docker",
+    # molecule transistive dependencies it should declare itself, but it doesn't
+    "click",
+    "packaging",
+    "wcmatch>=10.1",
+    "click_help_colors",
+    "jinja2",
+    "PyYAML",
+    "ansible_compat",
+    "rich",
+    "enrich",
+    "pluggy",
+    "bracex"
+]
+description = "Jaxzin's Ansible-based infrastructure bootstrap"
+
+dynamic = ["version"]
+
+[tool.uv]
+package = false
+
+[tool.setuptools]
+packages = []

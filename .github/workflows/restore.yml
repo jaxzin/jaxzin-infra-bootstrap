@@ -7,7 +7,7 @@ on:
 jobs:
   execute-restore:
     name: Restore Gitea from Backup
-    runs-on: self-hosted
+    runs-on: self-hosted && linux
     environment: production-restore # This provides a manual approval gate
     env:
       B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}

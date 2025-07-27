@@ -1,0 +1,31 @@
+---
+- name: Converge
+  hosts: all
+  vars:
+    certbot_data_path: "/volume1/docker/certbot"
+    gitea_admin_username: "admin"
+    gitea_admin_password: "dummy_admin_password"
+    gitea_admin_email: "admin@example.com"
+    gitea_app_ini_path_container: "/etc/gitea/app.ini"
+    gitea_app_ini_path_host: "{{ gitea_data_path }}/conf/app.ini"
+    gitea_data_path: "/volume1/docker/gitea"
+    gitea_db_data_path: "gitea-db-data"
+    gitea_service_data_path: "gitea-service-data"
+    gitea_secrets_data_path: "gitea-secrets-data"
+    gitea_db_image: "mysql:8"
+    gitea_db_name: "gitea"
+    gitea_db_password: "dummy_db_password"
+    gitea_db_user: "gitea"
+    gitea_domain: "instance"
+    gitea_image: "gitea/gitea:1.24.2-rootless"
+    gitea_internal_token: "{{ lookup('password', '/dev/null', length=32, chars='ascii_letters,digits') }}"
+    gitea_internal_token_path: "{{ gitea_secrets_path }}/internal_token"
+    gitea_jwt_secret: "{{ lookup('password', '/dev/null', length=64, chars='ascii_letters,digits') }}"
+    gitea_network_name: "gitea-net"
+    gitea_port: "3000"
+    gitea_port_container: "3000"
+    gitea_protocol: "http"
+    gitea_secrets_path: "{{ gitea_data_path }}/conf/secrets"
+    gitea_ssh_port: "22222"
+  roles:
+    - jaxzin.infra.gitea_server

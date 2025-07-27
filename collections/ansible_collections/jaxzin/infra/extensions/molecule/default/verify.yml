@@ -1,0 +1,9 @@
+---
+- name: Verify
+  hosts: all
+
+  tasks:
+    - name: Verify Gitea is serving web requests.
+      uri:
+        url: http://localhost:3000/
+        status_code: 200

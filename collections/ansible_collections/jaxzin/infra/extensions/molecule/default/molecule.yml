@@ -1,0 +1,24 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: docker
+platforms:
+  - name: instance
+    # Use an image specifically built for running Docker-in-Docker.
+#    image: docker:dind
+    # Build the image from the Dockerfile in this directory.
+    image: molecule_local/ansible-dind-tester
+
+    # This is the most critical setting. It grants the container
+    # extended kernel privileges required to run a nested Docker daemon.
+    privileged: true
+    # A best practice for DinD to avoid potential issues with
+    # overlay filesystems nesting.
+    command: --storage-driver=vfs
+    # Ensures the platform is ready before Molecule tries to use it.
+    pre_build_image: false
+provisioner:
+  name: ansible
+verifier:
+  name: ansible

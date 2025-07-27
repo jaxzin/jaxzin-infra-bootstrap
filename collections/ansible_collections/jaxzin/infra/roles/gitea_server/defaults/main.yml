@@ -1,0 +1,11 @@
+gitea_uid: "1000"
+gitea_gid: "1000"
+mysql_uid: "999"
+mysql_gid: "999"
+
+gitea_protocol: "https"
+gitea_port: "8443"
+gitea_port_container: "3000"
+
+# Used during molecule, skips heavier tasks
+test_mode: false

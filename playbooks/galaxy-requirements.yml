@@ -2,3 +2,5 @@
 collections:
   - name: tafeen.synology
     version: "1.0.1"
+  - name: community.vagrant
+    version: ">=1.0.0"

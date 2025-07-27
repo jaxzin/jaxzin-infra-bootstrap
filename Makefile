@@ -1,5 +1,20 @@
 ## Development Targets
 
+.PHONY: clean
+clean:
+#	@echo "Cleaning up development environment..."
+#	@($(MAKE) molecule-all -- destroy --all && $(MAKE) molecule-all -- reset) || true
+#	@echo "Removing all ansible cache files..."
+#	@echo rm -rf ~/.ansible
+	@echo "Removing Docker containers and images related to molecule testing..."
+	@docker ps -aq --filter ancestor=molecule_local | xargs -r docker rm -f
+	@docker images | grep molecule_local | awk '{print $$3}' | xargs -r docker rmi -f
+	@docker image prune -f
+	@echo "Cleaning up Docker system..."
+	@docker system df
+	@docker system prune -af --volumes
+	@echo "Cleanup complete."
+
 .PHONY: run-bootstrap
 run-bootstrap:
 	@echo "Running Bootstrap workflow locally with act..."
@@ -30,6 +45,33 @@ install-ansible-collections:
 docker-build:
 	@echo "Building custom Docker runner image..."
 	@docker build -t ghcr.io/jaxzin/jaxzin-infra-runner:latest .
+
+# ================ Ansible Molecule helpers BEGIN ======================
+
+# Single source of truth for running molecule against one role.
+# Default path for roles directory.
+COLLECTION_PATH ?= collections/ansible_collections/jaxzin/infra
+EXTENSIONS_PATH ?= $(COLLECTION_PATH)/extensions
+
+.PHONY: molecule
+molecule:
+	@echo "Symlinking collection to ~/.ansible/collections..."
+	@ln -sf $(realpath $(COLLECTION_PATH)) ~/.ansible/collections/ansible_collections/jaxzin/infra
+	@echo "Symlinking collection to ~/.ansible/collections..."
+	@if [ "$(word 2,$(MAKECMDGOALS))" = "" ]; then \
+		echo "Usage: make molecule -- [MOLECULE_ARGS...]"; \
+		exit 1; \
+	fi; \
+	args="$(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))"; \
+	echo "--- Testing collection jaxzin.infra with command molecule [$$args] ---"; \
+	uv run --directory $(EXTENSIONS_PATH) molecule $$args
+
+# Prevent additional args from being treated as targets.
+%:
+	@:
+
+# ================ Ansible Molecule helpers END ======================
+
 
 .PHONY: help
 help:

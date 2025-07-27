@@ -1,6 +1,7 @@
 ---
 galaxy_info:
-  author: Brian R. Jackson
+  role_name: gitea_server
+  author: jaxzin
   description: A role to deploy and manage the Gitea server and its database.
   license: MIT
   min_ansible_version: "2.12"
@@ -74,3 +75,19 @@ argument_specs:
       gitea_domain:
         type: "str"
         required: true
+      gitea_uid:
+        type: "str"
+        default: "1000"
+      gitea_gid:
+        type: "str"
+        default: "1000"
+      mysql_uid:
+        short_description: "MySQL process User ID"
+        description: "UID for the mysql user in the official container"
+        type: "str"
+        default: "999"
+      mysql_gid:
+        short_description: "MySQL process Group ID"
+        description: "GID for the mysql user in the official container"
+        type: "str"
+        default: "999"

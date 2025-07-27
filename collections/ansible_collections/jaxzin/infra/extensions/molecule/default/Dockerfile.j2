@@ -1,0 +1,4 @@
+FROM docker:dind
+RUN apk add --no-cache python3 py3-pip && \
+pip install docker ansible --break-system-packages
+SHELL ["/bin/sh", "-c"]
