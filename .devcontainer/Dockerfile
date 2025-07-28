@@ -10,6 +10,10 @@ FROM ubuntu:24.04
 RUN apt-get -o Acquire::AllowInsecureRepositories=true update \
     && apt-get install -y --reinstall debian-archive-keyring \
     && apt-get update \
-    && pipx install \
+    && apt-get install -y \
+        python3 \
+        python3-pip \
+        python3-venv \
+    && pip3 install --no-cache --break-system-packages \
         uv \
     && rm -rf /var/lib/apt/lists/*
