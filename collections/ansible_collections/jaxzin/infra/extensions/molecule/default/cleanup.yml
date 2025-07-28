@@ -1,0 +1,10 @@
+---
+- name: Cleanup any leftover Docker volumes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Prune all unused Docker volumes
+      ansible.builtin.shell: docker volume prune --force
+      failed_when: false
+      changed_when: false

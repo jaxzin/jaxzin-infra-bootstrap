@@ -1,0 +1,1 @@
+gitea_instance_url: "{{ gitea_protocol }}://{{ gitea_domain }}:{{ gitea_port }}"

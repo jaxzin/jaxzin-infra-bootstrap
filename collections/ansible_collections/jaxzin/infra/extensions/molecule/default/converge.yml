@@ -27,5 +27,48 @@
     gitea_protocol: "http"
     gitea_secrets_path: "{{ gitea_data_path }}/conf/secrets"
     gitea_ssh_port: "22222"
+    gitea_runner_data_path: "{{ gitea_data_path }}/gitea-runner"
+    gitea_runner_image_tag: "0.2.12"
+    gitea_runner_image: "gitea/act_runner:{{ gitea_runner_image_tag }}"
+    b2_application_key: "THESECRETKEY"
+    b2_application_key_id: "ASECRETKEYID"
+    b2_bucket_name: "test-bucket-123"
+
+  pre_tasks:
+    # Simulates parts of the DSM that the base image doesn't cover
+
+    - name: Ensure crond is installed and running
+      ansible.builtin.package:
+        name: cronie
+        state: present
+
+    - name: Ensure /etc/crontab exists with correct permissions
+      block:
+        - name: Check if /etc/crontab exists
+          ansible.builtin.stat:
+            path: /etc/crontab
+          register: crontab_stat
+
+        - name: "Create /etc/crontab if missing (leave it untouched if it already exists)"
+          ansible.builtin.copy:
+            dest: /etc/crontab
+            owner: root
+            group: root
+            mode: '0644'
+            content: ""
+          when: not crontab_stat.stat.exists
+
+    - name: Disable pip “break system packages” protection
+      ansible.builtin.copy:
+        dest: /etc/pip.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [global]
+          break-system-packages = true
   roles:
     - jaxzin.infra.gitea_server
+    - role: jaxzin.infra.gitea_runner
+      gitea_instance_url: "http://gitea:3000"
+    - jaxzin.infra.gitea_backup

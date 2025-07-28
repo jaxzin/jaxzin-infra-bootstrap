@@ -18,5 +18,8 @@ platforms:
     command: --storage-driver=vfs
 provisioner:
   name: ansible
+  # cleanup is experimental, so we need to explicitly enable it
+  playbooks:
+    cleanup: cleanup.yml
 verifier:
   name: ansible

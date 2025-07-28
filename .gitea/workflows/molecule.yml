@@ -1,4 +1,4 @@
-name: Ansible Role CI
+name: Ansible Molecule CI
 
 on:
   push:
@@ -9,13 +9,6 @@ on:
 jobs:
   test:
     runs-on: self-hosted && linux
-    strategy:
-      matrix:
-        role:
-          - gitea_server
-          - certbot
-          - gitea_runner
-          - gitea_backup
     steps:
       - uses: actions/checkout@v4
       - name: Build Devcontainer Image
@@ -25,5 +18,5 @@ jobs:
           runCmd: |
             set -e
             echo "Container built successfully. Running tests..."
-            cd /workspaces/jaxzin-infra-bootstrap/playbooks/roles/${{ matrix.role }}
-            molecule test --all
+            cd /workspaces/jaxzin-infra-bootstrap/
+            make molecule -- test --all

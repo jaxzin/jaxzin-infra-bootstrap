@@ -35,3 +35,7 @@ argument_specs:
       gitea_runner_data_path:
         type: "str"
         required: true
+      gitea_instance_url:
+        type: "str"
+        required: false
+        default: "{{ gitea_protocol }}://{{ gitea_domain }}:{{ gitea_port }}"

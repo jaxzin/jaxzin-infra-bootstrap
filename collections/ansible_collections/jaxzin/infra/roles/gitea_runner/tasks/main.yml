@@ -52,7 +52,7 @@
     dns_opts:
       - "ndots:0"
     env:
-      GITEA_INSTANCE_URL: "{{ gitea_protocol }}://{{ gitea_domain }}:{{ gitea_port }}"
+      GITEA_INSTANCE_URL: "{{ gitea_instance_url }}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
       GITEA_RUNNER_NAME: "nas-runner"
       GITEA_RUNNER_LABELS: "docker,linux,amd64,synology_dsm,self-hosted"

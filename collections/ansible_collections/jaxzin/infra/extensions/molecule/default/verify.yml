@@ -1,9 +1,50 @@
 ---
 - name: Verify
   hosts: all
-
+  vars:
+    gitea_data_path: "/volume1/docker/gitea"
   tasks:
     - name: Verify Gitea is serving web requests.
       uri:
         url: http://localhost:3000/
         status_code: 200
+
+    - name: Verify Gitea Runner is connected and idle.
+      block:
+        - name: Check if Gitea API token is already persisted
+          stat:
+            path: "{{ gitea_data_path }}/conf/api_token.txt"
+          register: api_token_file
+
+        - name: Load Gitea API token from remote file if it exists
+          block:
+            - name: Read Gitea API token from remote file
+              command: "cat {{ gitea_data_path }}/conf/api_token.txt"
+              register: api_token_content
+              changed_when: false
+
+            - name: Set Gitea API token fact
+              set_fact:
+                gitea_api_token: "{{ api_token_content.stdout | trim }}"
+          when: api_token_file.stat.exists
+
+        - name: Query Runners API
+          uri:
+            url: http://localhost:3000/api/v1/admin/actions/runners
+            method: GET
+            headers:
+              Authorization: "Bearer {{ gitea_api_token }}"
+            validate_certs: no
+            return_content: yes
+          register: gitea_runners  # gitea_runners.json is expected to be one property name runners as a list of runner objects
+
+        - name: Assert exactly one runner is idle
+          assert:
+            that:
+              - "(gitea_runners.json.runners 
+                   | selectattr('status','equalto','online') 
+                   | list 
+                   | length) == 1"
+
+    # TODO: Add verification tests for gitea_backup
+    # TODO: Add verification tests for certbot
