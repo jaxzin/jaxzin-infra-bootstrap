@@ -8,6 +8,7 @@ on:
 
 jobs:
   test:
+    image: node:18-alpine
     runs-on: linux
     steps:
       - uses: actions/checkout@v4
