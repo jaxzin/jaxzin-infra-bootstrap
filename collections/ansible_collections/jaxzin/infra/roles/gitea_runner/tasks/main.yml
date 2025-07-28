@@ -22,7 +22,7 @@
   block:
     - name: Get Gitea runner registration token
       uri:
-        url: "https://{{ gitea_domain }}:{{ gitea_port }}/api/v1/admin/runners/registration-token"
+        url: "{{ gitea_protocol }}://{{ gitea_domain }}:{{ gitea_port }}/api/v1/admin/runners/registration-token"
         method: GET
         headers:
           Authorization: "token {{ gitea_api_token }}"
@@ -37,7 +37,7 @@
       copy:
         content: "{{ gitea_runner_token }}"
         dest: "{{ gitea_data_path }}/conf/runner_token.txt"
-        owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+        owner: "1000"
         group: "users"
         mode: '0600'
 
@@ -52,7 +52,7 @@
     dns_opts:
       - "ndots:0"
     env:
-      GITEA_INSTANCE_URL: "https://{{ gitea_domain }}:{{ gitea_port }}"
+      GITEA_INSTANCE_URL: "{{ gitea_protocol }}://{{ gitea_domain }}:{{ gitea_port }}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
       GITEA_RUNNER_NAME: "nas-runner"
       GITEA_RUNNER_LABELS: "docker,linux,amd64,synology_dsm,self-hosted"
