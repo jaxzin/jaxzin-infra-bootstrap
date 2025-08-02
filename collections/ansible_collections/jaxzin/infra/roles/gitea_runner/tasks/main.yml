@@ -1,14 +1,26 @@
 ---
+- name: Create persistent directories for Gitea Runner
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: '0755'
+  loop:
+    - "{{ gitea_runner_path }}"
+    - "{{ gitea_runner_data_path }}"
+    - "{{ gitea_runner_workspace_path }}"
+
 - name: Check if Gitea runner token is already persisted
   stat:
-    path: "{{ gitea_data_path }}/conf/runner_token.txt"
+    path: "{{ gitea_runner_token_path }}"
   register: runner_token_file
   check_mode: no # Don't skip this task in check mode
 
 - name: Load Gitea runner token from remote file if it exists
   block:
     - name: Read Gitea runner token from remote file
-      command: "cat {{ gitea_data_path }}/conf/runner_token.txt"
+      command: "cat {{ gitea_runner_token_path }}"
       register: runner_token_content
       changed_when: false
     - name: Set Gitea runner token fact
@@ -36,7 +48,7 @@
     - name: Persist the new runner token to the filesystem
       copy:
         content: "{{ gitea_runner_token }}"
-        dest: "{{ gitea_data_path }}/conf/runner_token.txt"
+        dest: "{{ gitea_runner_token_path }}"
         owner: "1000"
         group: "users"
         mode: '0600'
@@ -58,4 +70,5 @@
       GITEA_RUNNER_LABELS: "docker,linux,amd64,synology_dsm,self-hosted"
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
+      - "{{ gitea_runner_workspace_path }}:/workspace"
       - "/var/run/docker.sock:/var/run/docker.sock"

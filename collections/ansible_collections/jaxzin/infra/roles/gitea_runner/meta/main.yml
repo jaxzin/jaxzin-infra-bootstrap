@@ -32,10 +32,19 @@ argument_specs:
       gitea_network_name:
         type: "str"
         required: true
-      gitea_runner_data_path:
-        type: "str"
-        required: true
       gitea_instance_url:
         type: "str"
         required: false
         default: "{{ gitea_protocol }}://{{ gitea_domain }}:{{ gitea_port }}"
+      gitea_runner_path:
+        type: "str"
+        required: false
+        default: "{{ gitea_data_path }}/gitea-runner"
+      gitea_runner_data_path:
+        type: "str"
+        required: false
+        default: "{{ gitea_runner_path }}/data"
+      gitea_runner_workspace_path:
+        type: "str"
+        required: false
+        default: "{{ gitea_runner_path }}/workspace"

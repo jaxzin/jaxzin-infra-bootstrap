@@ -9,7 +9,6 @@
     mode: '0755'
   loop:
     - gitea
-    - gitea-runner
     - conf
     - conf/secrets
     - tmp

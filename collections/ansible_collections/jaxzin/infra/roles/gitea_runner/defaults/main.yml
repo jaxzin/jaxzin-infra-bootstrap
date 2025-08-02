@@ -1,1 +1,5 @@
 gitea_instance_url: "{{ gitea_protocol }}://{{ gitea_domain }}:{{ gitea_port }}"
+gitea_runner_path: "{{ gitea_data_path }}/gitea-runner"
+gitea_runner_data_path: "{{ gitea_runner_path }}/data"
+gitea_runner_workspace_path: "{{ gitea_runner_path }}/workspace"
+gitea_runner_token_path: "{{ gitea_runner_data_path }}/runner_token.txt"
