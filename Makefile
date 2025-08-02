@@ -42,15 +42,25 @@ health-check:
 	@act -W .github/workflows/health-check.yml --secret-file .secrets --var-file .vars --container-architecture linux/amd64 -P self-hosted=ghcr.io/jaxzin/jaxzin-infra-runner:latest
 
 
-.PHONY: install-ansible-collections
-install-ansible-collections:
-	@echo "Installing Ansible Galaxy collections..."
-	@ansible-galaxy collection install -r playbooks/galaxy-requirements.yml
+.PHONY: deps sync-deps
+sync-deps:
+	@echo "Generating requirements.yml from galaxy.yml..."
+	@yq e '.dependencies | to_entries | map({"name": .key, "version": .value}) | {"collections": .}' \
+	collections/ansible_collections/jaxzin/infra/galaxy.yml > requirements.yml
+
+deps: sync-deps
+	@echo "Installing Ansible Galaxy collections from requirements.yml..."
+	@uv run ansible-galaxy collection install -r requirements.yml --force-with-deps
 
 .PHONY: docker-build
 docker-build:
 	@echo "Building custom Docker runner image..."
 	@docker build -t ghcr.io/jaxzin/jaxzin-infra-runner:latest .
+
+.PHONY: devcontainer-build
+devcontainer-build:
+	@echo "Building development container image..."
+	@docker build -f .devcontainer/Dockerfile -t ghcr.io/jaxzin/jaxzin-infra-devcontainer:latest .
 
 # ================ Ansible Molecule helpers BEGIN ======================
 
@@ -59,22 +69,30 @@ docker-build:
 COLLECTION_PATH ?= collections/ansible_collections/jaxzin/infra
 EXTENSIONS_PATH ?= $(COLLECTION_PATH)/extensions
 
+.PHONY: link-collection
+link-collection:
+	@echo "Linking Ansible collection for development..."
+	@mkdir -p $(HOME)/.ansible/$(COLLECTION_PATH)
+	@ln -sf $(CURDIR)/$(COLLECTION_PATH) $(HOME)/.ansible/$(COLLECTION_PATH)
+	@echo "Collection linked at $(HOME)/.ansible/$(COLLECTION_PATH)"
+
 .PHONY: molecule
-molecule:
+molecule: link-collection
 	# Conditionally add ./collections to ANSIBLE_COLLECTIONS_PATHS if not already present
-	@COLLECTIONS_PATH="$$PWD/collections"; \
-	case ":$${ANSIBLE_COLLECTIONS_PATH}:" in \
-	  *:"$$COLLECTIONS_PATH":*) ;; \
-	  *) export ANSIBLE_COLLECTIONS_PATH="$$COLLECTIONS_PATH:$${ANSIBLE_COLLECTIONS_PATH}";; \
-	esac; \
-	echo "ANSIBLE_COLLECTIONS_PATH=$${ANSIBLE_COLLECTIONS_PATH}"; \
-	uv run ansible-galaxy collection install --force-with-deps ~./ansible/collections; \
+	#@COLLECTIONS_PATH="$$PWD/collections"; \
+	#case ":$${ANSIBLE_COLLECTIONS_PATH}:" in \
+	#  *:"$$COLLECTIONS_PATH":*) ;; \
+	#  *) export ANSIBLE_COLLECTIONS_PATH="$$COLLECTIONS_PATH:$${ANSIBLE_COLLECTIONS_PATH}";; \
+	#esac; \
+	#echo "ANSIBLE_COLLECTIONS_PATH=$${ANSIBLE_COLLECTIONS_PATH}"; \
+	#uv run ansible-galaxy collection install --force-with-deps ~/.ansible/collections; \
 	if [ "$(word 2,$(MAKECMDGOALS))" = "" ]; then \
 		echo "Usage: make molecule -- [MOLECULE_ARGS...]"; \
 		exit 1; \
 	fi; \
 	args="$(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))"; \
 	echo "--- Testing collection jaxzin.infra with command molecule [$$args] ---"; \
+	uv run ansible-galaxy collection install jaxzin.infra -p ./collections; \
 	UV_LINK_MODE=copy uv run -v --directory $(EXTENSIONS_PATH) molecule $$args
 
 # Prevent additional args from being treated as targets.

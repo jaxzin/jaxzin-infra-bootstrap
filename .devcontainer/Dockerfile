@@ -1,6 +1,11 @@
+FROM ghcr.io/mikefarah/yq AS yq-stage
+
 FROM mcr.microsoft.com/devcontainers/python:3.13-bookworm
 #FROM mcr.microsoft.com/devcontainers/ansible:latest
 #FROM ubuntu:24.04
+
+# Install yq from the yq-stage image
+COPY --from=yq-stage /usr/bin/yq /usr/local/bin/yq
 
 # Forcefully fix GPG key errors.
 # 1. First 'update' ignores GPG errors to refresh package lists.

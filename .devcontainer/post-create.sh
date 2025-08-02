@@ -10,11 +10,14 @@ uv sync
 
 # Install the development collection so that Molecule can reference it
 uv run ansible-galaxy collection install jaxzin.infra -p ./collections
+uv run make deps
 
 # Add molecule autocomplete to the devcontainer shell
-echo 'eval "$(_MOLECULE_COMPLETE=SHELL_source uv run molecule)"' >> ~/.bashrc
+echo 'eval "$(_MOLECULE_COMPLETE=SHELL_source uv run molecule)"' >> /home/vscode/.bashrc
 
 # Drop into the virtual environment
-echo 'source /home/vscode/.venv/bin/activate' >> ~/.bashrc
+echo 'source .venv/bin/activate' >> /home/vscode/.bashrc
+
+echo "export ANSIBLE_COLLECTIONS_PATH=\"\$(pwd)/collections:\$(uv run ansible-config dump --format json | jq -r '.[] | select(.name == \"COLLECTIONS_PATHS\") | .value[]' | grep -vxF \$(pwd)/collections | paste -sd: -)\"" >> /home/vscode/.bashrc
 
 echo "Devcontainer setup complete. Molecule and other tools are installed."
