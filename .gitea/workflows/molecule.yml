@@ -24,7 +24,7 @@ jobs:
         uses: devcontainers/ci@v0.3
         with:
           imageName: ansible-ci
-          workspaceFolder: /github/workspace
+          workspaceFolder: /volume1/docker/gitea/gitea-runner/workspace
           runCmd: |
             set -e
             echo "Container built successfully. Running tests..."
