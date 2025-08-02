@@ -1,11 +1,11 @@
 ## Development Targets
 
-.PHONY: clean
-clean:
-#	@echo "Cleaning up development environment..."
-#	@($(MAKE) molecule-all -- destroy --all && $(MAKE) molecule-all -- reset) || true
-#	@echo "Removing all ansible cache files..."
-#	@echo rm -rf ~/.ansible
+.PHONY: nuke
+nuke:
+	@echo "Nuking the development environment..."
+	@$(MAKE) clean
+	@echo "Removing all ansible cache files..."
+	@echo rm -rf ~/.ansible
 	@echo "Removing Docker containers and images related to molecule testing..."
 	@docker ps -aq --filter ancestor=molecule_local | xargs -r docker rm -f
 	@docker images | grep molecule_local | awk '{print $$3}' | xargs -r docker rmi -f
@@ -13,6 +13,12 @@ clean:
 	@echo "Cleaning up Docker system..."
 	@docker system df
 	@docker system prune -af --volumes
+	@echo "Development environment nuked."
+
+.PHONY: clean
+clean:
+	@echo "Tearing down any molecule scenarios..."
+	@($(MAKE) molecule -- destroy --all && $(MAKE) molecule -- reset) || true
 	@echo "Cleanup complete."
 
 .PHONY: run-bootstrap
@@ -55,16 +61,21 @@ EXTENSIONS_PATH ?= $(COLLECTION_PATH)/extensions
 
 .PHONY: molecule
 molecule:
-	@echo "Symlinking collection to ~/.ansible/collections..."
-	@ln -sf $(realpath $(COLLECTION_PATH)) ~/.ansible/collections/ansible_collections/jaxzin/infra
-	@echo "Symlinking collection to ~/.ansible/collections..."
-	@if [ "$(word 2,$(MAKECMDGOALS))" = "" ]; then \
+	# Conditionally add ./collections to ANSIBLE_COLLECTIONS_PATHS if not already present
+	@COLLECTIONS_PATH="$$PWD/collections"; \
+	case ":$${ANSIBLE_COLLECTIONS_PATH}:" in \
+	  *:"$$COLLECTIONS_PATH":*) ;; \
+	  *) export ANSIBLE_COLLECTIONS_PATH="$$COLLECTIONS_PATH:$${ANSIBLE_COLLECTIONS_PATH}";; \
+	esac; \
+	echo "ANSIBLE_COLLECTIONS_PATH=$${ANSIBLE_COLLECTIONS_PATH}"; \
+	uv run ansible-galaxy collection install --force-with-deps ~./ansible/collections; \
+	if [ "$(word 2,$(MAKECMDGOALS))" = "" ]; then \
 		echo "Usage: make molecule -- [MOLECULE_ARGS...]"; \
 		exit 1; \
 	fi; \
 	args="$(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))"; \
 	echo "--- Testing collection jaxzin.infra with command molecule [$$args] ---"; \
-	uv run --directory $(EXTENSIONS_PATH) molecule $$args
+	UV_LINK_MODE=copy uv run -v --directory $(EXTENSIONS_PATH) molecule $$args
 
 # Prevent additional args from being treated as targets.
 %:

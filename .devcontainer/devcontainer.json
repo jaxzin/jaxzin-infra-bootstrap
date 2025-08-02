@@ -5,9 +5,9 @@
     "dockerfile": "Dockerfile"
   },
 
-  "mounts": [
-    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
-  ],
+//  "mounts": [
+//    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+//  ],
 
   "customizations": {
     "vscode": {
@@ -18,12 +18,19 @@
       "extensions": [
         "ms-azuretools.vscode-docker",
         "redhat.ansible",
-        "ms-python.python"
+        "ms-python.python",
+        "ms-python.vscode-pylance"
       ]
     },
     "jetbrains": {
       "backend": "IntelliJ",
       "settings": {
+        "com.intellij:app:HttpConfigurable.use_proxy_pac": true,
+        "com.intellij:app:BaseRefactoringSettings.move_search_for_references_for_file": false,
+        "com.intellij:app:BaseRefactoringSettings.rename_search_for_references_for_directory": false,
+        "com.intellij:app:BaseRefactoringSettings.rename_search_in_comments_for_file": false,
+        "com.intellij:app:BaseRefactoringSettings.rename_search_for_references_for_file": false,
+        "com.intellij:app:BaseRefactoringSettings.safe_delete_when_delete": false,
         // IDE settings can be added via “Show context actions”|“Add currently modified settings from IDE”
         // A complete list of supported settings is also available through auto-completion
         "com.intellij:app:VcsApplicationSettings.detect_patch_on_the_fly": true,
@@ -56,10 +63,10 @@
 
   "features": {
     "ghcr.io/devcontainers/features/git": {},
-    // This is the correct feature for the Docker-out-of-Docker pattern.
-    // It installs the Docker CLI and handles socket permissions automatically.
-    "ghcr.io/devcontainers/features/docker-from-docker:1": {
-      "version": "latest"
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/python:1": {
+      // This is redundant with the base image, but ensures the Python version is set.
+      "version": "3.13"
     },
     // This feature provides make, git, rsync, and other common tools.
     // The base image already has git, but this feature ensures it's configured.
@@ -70,6 +77,12 @@
       "upgradePackages": true
     }
   },
+
+  // Needed to run Docker commands inside the container.
+  "runArgs": [
+    "--privileged"
+  ],
+
 
   "postCreateCommand": ".devcontainer/post-create.sh",
 }
