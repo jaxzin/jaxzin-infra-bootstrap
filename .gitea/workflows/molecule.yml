@@ -25,7 +25,6 @@ jobs:
         with:
           imageName: ansible-ci
           workspaceFolder: /github/workspace
-          configFile: /github/workspace/.devcontainer/devcontainer.json
           runCmd: |
             set -e
             echo "Container built successfully. Running tests..."
