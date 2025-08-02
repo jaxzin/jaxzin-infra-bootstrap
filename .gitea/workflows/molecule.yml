@@ -9,8 +9,8 @@ on:
 jobs:
   test:
     runs-on: linux
-    container:
-      image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
+#    container:
+#      image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
     steps:
       - uses: actions/setup-node@v3    # installs node into PATH
         with:
