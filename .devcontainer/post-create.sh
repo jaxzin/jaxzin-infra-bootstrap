@@ -18,6 +18,7 @@ echo 'eval "$(_MOLECULE_COMPLETE=SHELL_source uv run molecule)"' >> /home/vscode
 # Drop into the virtual environment
 echo 'source .venv/bin/activate' >> /home/vscode/.bashrc
 
+# Ensure the collections path is set correctly for Ansible development
 echo "export ANSIBLE_COLLECTIONS_PATH=\"\$(pwd)/collections:\$(uv run ansible-config dump --format json | jq -r '.[] | select(.name == \"COLLECTIONS_PATHS\") | .value[]' | grep -vxF \$(pwd)/collections | paste -sd: -)\"" >> /home/vscode/.bashrc
 
 echo "Devcontainer setup complete. Molecule and other tools are installed."
