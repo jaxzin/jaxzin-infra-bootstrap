@@ -20,15 +20,6 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Debug workspace and mount paths
-        run: |
-          echo "PWD: $(pwd)"
-          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
-          echo "Listing contents of /github/workspace:"
-          ls -la /github/workspace
-          echo "Searching for jaxzin-infra-bootstrap:"
-          find / -type d -name jaxzin-infra-bootstrap || echo "Not found"
-
       - name: Build Devcontainer Image
         uses: devcontainers/ci@v0.3
         with:
