@@ -9,12 +9,9 @@ on:
 jobs:
   test:
     runs-on: linux
-#    container:
-#      image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
+    container:
+      image: node:18-alpine
     steps:
-      - name: Ensure node is in PATH
-        run: |
-          apk add --no-cache nodejs npm
       - uses: actions/checkout@v4
       - name: Build Devcontainer Image
         uses: devcontainers/ci@v0.3
