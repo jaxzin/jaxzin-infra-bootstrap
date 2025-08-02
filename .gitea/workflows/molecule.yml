@@ -10,8 +10,16 @@ jobs:
   test:
     runs-on: linux
     container:
-      image: node:18-alpine
+      image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock  # Required for Docker-outside-of-Docker
     steps:
+      # Install node.js and npm
+      - name: Install Node.js and npm
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
       - uses: actions/checkout@v4
       - name: Build Devcontainer Image
         uses: devcontainers/ci@v0.3
