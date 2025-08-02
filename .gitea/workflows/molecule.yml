@@ -12,9 +12,6 @@ jobs:
 #    container:
 #      image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
     steps:
-      - uses: actions/setup-node@v3    # installs node into PATH
-        with:
-          node-version: "18"
       - uses: actions/checkout@v4
       - name: Build Devcontainer Image
         uses: devcontainers/ci@v0.3
