@@ -71,4 +71,3 @@
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
       - "{{ gitea_runner_workspace_path }}:/workspace"
-      - "/var/run/docker.sock:/var/run/docker.sock"
