@@ -11,8 +11,6 @@ jobs:
     runs-on: linux
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock  # Required for Docker-outside-of-Docker
     steps:
       # Install node.js and npm
       - name: Install Node.js and npm
