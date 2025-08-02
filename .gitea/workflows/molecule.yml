@@ -14,9 +14,7 @@ jobs:
     steps:
       - name: Ensure node is in PATH
         run: |
-          export PATH="/usr/local/bin:$PATH"
-          which node
-          node -v
+          apk add --no-cache nodejs npm
       - uses: actions/checkout@v4
       - name: Build Devcontainer Image
         uses: devcontainers/ci@v0.3
