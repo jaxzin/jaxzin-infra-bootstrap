@@ -15,6 +15,9 @@ jobs:
       volumes:
         # Mount cgroups to allow Docker-in-Docker to work properly.
         - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      capabilities:
+        - NET_ADMIN
+        - NET_RAW
     services:
       docker:
         image: docker:dind
