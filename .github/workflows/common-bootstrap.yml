@@ -46,7 +46,6 @@ jobs:
 
       - name: Deploy infrastructure
         id: deploy
-        continue-on-error: true
         uses: dawidd6/action-ansible-playbook@v4
         with:
           playbook: gitea-deploy.yml
