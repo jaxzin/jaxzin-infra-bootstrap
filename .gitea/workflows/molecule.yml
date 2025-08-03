@@ -23,10 +23,6 @@ jobs:
         name: docker
         image: docker:dind
         options: --privileged --shm-size=2g
-        env:
-          DOCKER_TLS_CERTDIR: ""
-        ports:
-          - 2375:2375
         volumes:
           - /var/run/docker.sock:/var/run/docker.sock:ro
     steps:
@@ -50,12 +46,12 @@ jobs:
 #
       - uses: actions/checkout@v4
 
-      - name: Resolve DinD container IP
-        id: get-dind-ip
-        run: |
-          ip=$(getent hosts docker | awk '{ print $1 }')
-          echo "DOCKER_HOST=tcp://$ip:2375" >> $GITHUB_ENV
-          echo "Resolved DOCKER_HOST=tcp://$ip:2375"
+#      - name: Resolve DinD container IP
+#        id: get-dind-ip
+#        run: |
+#          ip=$(getent hosts docker | awk '{ print $1 }')
+#          echo "DOCKER_HOST=tcp://$ip:2375" >> $GITHUB_ENV
+#          echo "Resolved DOCKER_HOST=tcp://$ip:2375"
 
       - name: Build Devcontainer Image
         uses: devcontainers/ci@v0.3
