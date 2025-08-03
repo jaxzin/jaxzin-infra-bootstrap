@@ -57,5 +57,6 @@
       GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
       GITEA_RUNNER_NAME: "nas-runner"
       GITEA_RUNNER_LABELS: "docker,linux,amd64,synology_dsm,self-hosted"
+      DOCKER_INSECURE_NO_IPTABLES_RAW: "1" # needed for Docker-in-Docker on the Synology DSM which does not include iptables_raw kernel module
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
