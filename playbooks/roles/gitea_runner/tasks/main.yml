@@ -41,24 +41,11 @@
         group: "users"
         mode: '0600'
 
-# Don't bind job containers to docker outside of the containers, we will use Docker-in-Docker (DinD)
-- name: Ensure Gitea runner data directory exists
-  file: "{{ gitea_runner_data_path }}/.runner"
-  state: directory
-  owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
-  group: "users"
-  mode: '0755'
-- name: Configure gitea-runner
-  copy:
-    dest: "{{ gitea_runner_data_path }}/.runner/config.yaml"
-    content: |
-      container:
-        container-daemon-socket: "-"
-
 - name: Deploy Gitea runner container
   community.docker.docker_container:
     name: gitea-runner
     image: "{{ gitea_runner_image }}"
+    command: ["daemon", "--container-daemon-socket=-"] # Don't mount docker into job containers
     state: started
     restart_policy: always
     networks:
