@@ -53,6 +53,8 @@ jobs:
 #          ip=$(getent hosts docker | awk '{ print $1 }')
 #          echo "DOCKER_HOST=tcp://$ip:2375" >> $GITHUB_ENV
 #          echo "Resolved DOCKER_HOST=tcp://$ip:2375"
+      - name: Pause to debug
+        run: sleep 3600
 
       - name: Build Devcontainer Image
         uses: devcontainers/ci@v0.3
