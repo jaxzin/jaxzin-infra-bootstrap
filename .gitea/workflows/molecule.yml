@@ -23,6 +23,8 @@ jobs:
         name: docker
         image: docker:dind
         options: --privileged --shm-size=2g
+        env:
+          DOCKER_TLS_CERTDIR: ""
         ports:
           - 2375:2375
     steps:
