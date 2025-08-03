@@ -51,6 +51,7 @@
       - name: "{{ gitea_network_name }}"
     dns_opts:
       - "ndots:0"
+    privileged: true
     env:
       GITEA_INSTANCE_URL: "https://{{ gitea_domain }}:{{ gitea_port }}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
