@@ -23,6 +23,8 @@ jobs:
         name: docker
         image: docker:dind
         options: --privileged --shm-size=2g
+        ports:
+          - 2375:2375
     steps:
 #      - name: Install curl
 #        run: |
