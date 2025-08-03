@@ -13,8 +13,11 @@ jobs:
       image: ghcr.io/jaxzin/jaxzin-infra-runner@sha256:cff903315d73de05fd164d95d475ef7f04c36c90a4108247e4742eb339afc2b4
       privileged: true
       volumes:
-        # Mount the Docker socket to allow the job container to communicate with the runner Docker service.
-        - /var/run/docker.sock:/var/run/docker.sock
+        # Mount cgroups to allow Docker-in-Docker to work properly.
+        - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      capabilities:
+        - NET_ADMIN
+        - NET_RAW
     services:
       docker:
         name: docker
