@@ -10,7 +10,7 @@ jobs:
   test:
     runs-on: linux
     container:
-      image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
+      image: ghcr.io/jaxzin/jaxzin-infra-runner@sha256:e4596e84a0196f54ac9728b11f31702d71559fd42923858a28fd4b2906298dcc
       privileged: true
       volumes:
         # Mount cgroups to allow Docker-in-Docker to work properly.
