@@ -16,13 +16,13 @@ jobs:
         run: |
           which apk && apk add --no-cache curl || echo "apk not available"
       # Install node.js and npm
-      - name: Install Node
+      - name: Install Node (Alpine-compatible)
         run: |
           NODE_VERSION=18.20.2
           ARCH=x64
-          curl -fsSL https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-$ARCH.tar.xz -o node.tar.xz
+          curl -fsSL https://unofficial-builds.nodejs.org/download/release/v$NODE_VERSION/node-v$NODE_VERSION-linux-musl-$ARCH.tar.gz -o node.tar.gz
           mkdir -p $HOME/.local/node
-          tar -xf node.tar.xz -C $HOME/.local/node --strip-components=1
+          tar -xzf node.tar.gz -C $HOME/.local/node --strip-components=1
           echo "$HOME/.local/node/bin" >> $GITHUB_PATH
       # Install node.js and npm
       - name: Install Node.js and npm
