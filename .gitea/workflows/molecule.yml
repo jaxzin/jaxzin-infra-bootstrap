@@ -20,8 +20,9 @@ jobs:
         - NET_RAW
     services:
       docker:
+        name: docker
         image: docker:dind
-        options: --name docker --privileged --shm-size=2g
+        options: --privileged --shm-size=2g
     env:
       DOCKER_HOST: tcp://docker:2375
     steps:
