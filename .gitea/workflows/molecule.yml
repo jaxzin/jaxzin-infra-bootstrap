@@ -23,8 +23,6 @@ jobs:
         name: docker
         image: docker:dind
         options: --privileged --shm-size=2g
-    env:
-      DOCKER_HOST: tcp://docker:2375
     steps:
 #      - name: Install curl
 #        run: |
@@ -47,11 +45,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Resolve DinD container IP
-        id: get-ip
+        id: get-dind-ip
         run: |
-          ip=$(getent hosts docker || true | awk '{ print $1 }')
+          ip=$(getent hosts docker | awk '{ print $1 }')
           echo "DOCKER_HOST=tcp://$ip:2375" >> $GITHUB_ENV
-          echo "Resolved IP: $ip"
+          echo "Resolved DOCKER_HOST=tcp://$ip:2375"
 
       - name: Build Devcontainer Image
         uses: devcontainers/ci@v0.3
