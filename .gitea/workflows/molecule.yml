@@ -21,7 +21,7 @@ jobs:
     services:
       docker:
         image: docker:dind
-        options: --privileged --shm-size=2g
+        options: --name docker --privileged --shm-size=2g
     env:
       DOCKER_HOST: tcp://docker:2375
     steps:
