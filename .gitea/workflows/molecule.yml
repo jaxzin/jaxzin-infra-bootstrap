@@ -18,15 +18,16 @@ jobs:
       capabilities:
         - NET_ADMIN
         - NET_RAW
-    services:
-      docker:
-        name: docker
-        image: docker:dind
-        privileged: true
-        options: --shm-size=2g
-#        volumes:
-#          - /var/run/docker.sock:/var/run/docker.sock:ro
     steps:
+      - name: Install and start Docker Daemon
+        run: |
+          apt-get update
+          apt-get install -y docker.io
+          dockerd --host=unix:///var/run/docker.sock &
+          echo "Waiting for dockerd..."
+          while ! docker info >/dev/null 2>&1; do sleep 1; done
+        env:
+          DOCKER_TLS_CERTDIR: ""
 #      - name: Install curl
 #        run: |
 #          which apk && apk add --no-cache curl || echo "apk not available"
