@@ -9,8 +9,8 @@ on:
 jobs:
   test:
     runs-on: linux
-    container:
-      image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
+#    container:
+#      image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
     steps:
       # Install node.js and npm
       - name: Install Node.js and npm
