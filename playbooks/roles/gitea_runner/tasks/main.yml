@@ -41,6 +41,14 @@
         group: "users"
         mode: '0600'
 
+# Don't bind job containers to docker outside of the containers, we will use Docker-in-Docker (DinD)
+- name: Configure gitea-runner
+  copy:
+    dest: "{{ gitea_runner_data_path }}/.runner/config.yaml"
+    content: |
+      container:
+        container-daemon-socket: "-"
+
 - name: Deploy Gitea runner container
   community.docker.docker_container:
     name: gitea-runner
