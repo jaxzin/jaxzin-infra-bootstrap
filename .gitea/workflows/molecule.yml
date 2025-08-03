@@ -12,6 +12,9 @@ jobs:
 #    container:
 #      image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
     steps:
+      - name: Install curl
+        run: |
+          which apk && apk add --no-cache curl || echo "apk not available"
       # Install node.js and npm
       - name: Install Node
         run: |
