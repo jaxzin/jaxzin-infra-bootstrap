@@ -23,7 +23,9 @@ jobs:
         run: |
           apt-get update
           apt-get install -y docker.io
-          dockerd --host=unix:///var/run/docker.sock &
+          update-alternatives --set iptables /usr/sbin/iptables-legacy
+          update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
+          dockerd --storage-driver=vfs --host=unix:///var/run/docker.sock &
           echo "Waiting for dockerd..."
           while ! docker info >/dev/null 2>&1; do sleep 1; done
         env:
