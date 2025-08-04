@@ -1,0 +1,6 @@
+---
+- name: Restart Gitea runner
+  community.docker.docker_container:
+    name: gitea-runner
+    state: started
+    restart: yes
