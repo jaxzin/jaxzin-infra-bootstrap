@@ -57,6 +57,8 @@
     owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
     group: "users"
     mode: '0644'
+  notify:
+    - Restart Gitea runner
 
 - name: Deploy Gitea runner container
   community.docker.docker_container:
