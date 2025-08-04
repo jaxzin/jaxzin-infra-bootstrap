@@ -70,7 +70,7 @@
       - "ndots:0"
     privileged: true
     env:
-      CONFIG_FILE: "{{ gitea_runner_config_file }}"
+      CONFIG_FILE: "/data/conf/config.yml"
       GITEA_INSTANCE_URL: "https://{{ gitea_domain }}:{{ gitea_port }}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
       GITEA_RUNNER_NAME: "nas-runner"
