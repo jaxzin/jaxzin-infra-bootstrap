@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+echo "PATH=$PATH"
+echo "which python3: $(which python3 || echo 'not found')"
+echo "python3 version: $(python3 --version || echo 'not found')"
+echo "uv version: $(uv --version || echo 'uv not found')"
+
 # Setup uv with all the Ansible Molecule dependencies
 # Keep the uv virtual environment in the container, rather than the workspace which might be shared with the host
 #  and likely won't have the Python interpreter installed in the same location to symlink to.
