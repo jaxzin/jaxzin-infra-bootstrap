@@ -19,7 +19,7 @@ jobs:
     if: failure()
     steps:
       - name: Notify Discord on failure
-        uses: Ilshidur/action-discord@0.3.2
+        uses: Ilshidur/action-discord@0.4.0
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         with:
@@ -32,7 +32,7 @@ jobs:
     if: success()
     steps:
       - name: Notify Discord on success
-        uses: Ilshidur/action-discord@0.3.2
+        uses: Ilshidur/action-discord@0.4.0
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         with:
