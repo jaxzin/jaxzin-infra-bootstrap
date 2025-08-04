@@ -10,6 +10,7 @@ echo "uv version: $(uv --version || echo 'uv not found')"
 # Keep the uv virtual environment in the container, rather than the workspace which might be shared with the host
 #  and likely won't have the Python interpreter installed in the same location to symlink to.
 uv venv /home/vscode/.venv
+export UV_VENV_PATH=/home/vscode/.venv
 
 # Create a virtual environment for uv and install the project dependencies
 uv sync
