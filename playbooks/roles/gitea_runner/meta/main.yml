@@ -35,3 +35,9 @@ argument_specs:
       gitea_runner_data_path:
         type: "str"
         required: true
+      gitea_runner_config_file_parent:
+        type: "str"
+        default: "{{ gitea_runner_data_path }}/conf"
+      gitea_runner_config_file:
+        type: "str"
+        default: "{{ gitea_runner_config_file_parent }}/config.yml"
