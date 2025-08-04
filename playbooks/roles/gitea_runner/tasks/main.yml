@@ -1,11 +1,12 @@
 ---
 
 - name: Ensure Gitea runner config directory exists
-  file: "{{ gitea_runner_config_file_parent }}"
-  state: directory
-  owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
-  group: "users"
-  mode: '0755'
+  file:
+    path: "{{ gitea_runner_config_file_parent }}"
+    state: directory
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "users"
+    mode: '0755'
 
 - name: Check if Gitea runner token is already persisted
   stat:
