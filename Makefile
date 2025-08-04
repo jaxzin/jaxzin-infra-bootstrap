@@ -57,10 +57,20 @@ docker-build:
 	@echo "Building custom Docker runner image..."
 	@docker build -t ghcr.io/jaxzin/jaxzin-infra-runner:latest .
 
+REPO := ghcr.io/$(USER)/$(shell basename $(CURDIR))
+BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
+TAG := $(REPO):$(BRANCH)
+
 .PHONY: devcontainer-build
 devcontainer-build:
-	@echo "Building development container image..."
-	@docker build -f .devcontainer/Dockerfile -t ghcr.io/jaxzin/jaxzin-infra-devcontainer:latest .
+	@echo "🔨 Building DevContainer with Docker: $(TAG)"
+	docker build -f .devcontainer/Dockerfile \
+		-t $(TAG) \
+		.
+
+.PHONY: devcontainer-push
+devcontainer-push:
+	docker push $(TAG)
 
 # ================ Ansible Molecule helpers BEGIN ======================
 

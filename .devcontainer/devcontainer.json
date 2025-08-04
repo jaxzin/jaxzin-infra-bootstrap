@@ -1,9 +1,7 @@
 // To fully customize your devcontainer, see https://containers.dev/implementors/json_reference
 {
   "name": "Ansible Development",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
+  "image": "ghcr.io/jaxzin/jaxzin-infra-bootstrap:${localEnv:GITHUB_REF_NAME}",
 
 //  "mounts": [
 //    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"

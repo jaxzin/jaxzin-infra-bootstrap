@@ -59,6 +59,8 @@ jobs:
 
       - name: Build Devcontainer Image
         uses: devcontainers/ci@v0.3
+        env:
+          GITHUB_REF_NAME: ${{ gitea.ref_name }}
         with:
           imageName: ansible-ci
           runCmd: |
