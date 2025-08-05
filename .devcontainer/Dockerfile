@@ -1,6 +1,6 @@
 FROM ghcr.io/mikefarah/yq AS yq-stage
 
-FROM mcr.microsoft.com/devcontainers/python:3.13-bookworm
+FROM mcr.microsoft.com/devcontainers/base:ubuntu-20.04
 #FROM mcr.microsoft.com/devcontainers/ansible:latest
 #FROM ubuntu:24.04
 

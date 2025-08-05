@@ -63,7 +63,6 @@
     "ghcr.io/devcontainers/features/git": {},
     "ghcr.io/devcontainers/features/docker-in-docker:2": {},
     "ghcr.io/devcontainers/features/python:1": {
-      // This is redundant with the base image, but ensures the Python version is set.
       "version": "3.13"
     },
     // This feature provides make, git, rsync, and other common tools.
