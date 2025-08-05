@@ -30,7 +30,8 @@ jobs:
         id: img
         uses: devcontainers/ci@v0.3
         with:
-          imageName: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ github.ref_name }}
-          cacheFrom: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:main
+          imageName: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}
+          imageTag: dev-${{ github.ref_name }}, dev
+          cacheFrom: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:dev-main
           push: always
           platform: linux/amd64,linux/arm64

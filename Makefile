@@ -68,6 +68,16 @@ devcontainer-build:
 		-t $(TAG) \
 		.
 
+.PHONY: devcontainer-buildx
+devcontainer-buildx:
+	@echo "🔨 Building multi-arch DevContainer with Docker: $(TAG)"
+	docker buildx build \
+		--platform linux/amd64,linux/arm64 \
+		--file .devcontainer/Dockerfile \
+		--tag $(TAG) \
+		--push \
+		.
+
 .PHONY: devcontainer-push
 devcontainer-push:
 	docker push $(TAG)
