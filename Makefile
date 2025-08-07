@@ -98,14 +98,6 @@ link-collection:
 
 .PHONY: molecule
 molecule: link-collection
-	# Conditionally add ./collections to ANSIBLE_COLLECTIONS_PATHS if not already present
-	#@COLLECTIONS_PATH="$$PWD/collections"; \
-	#case ":$${ANSIBLE_COLLECTIONS_PATH}:" in \
-	#  *:"$$COLLECTIONS_PATH":*) ;; \
-	#  *) export ANSIBLE_COLLECTIONS_PATH="$$COLLECTIONS_PATH:$${ANSIBLE_COLLECTIONS_PATH}";; \
-	#esac; \
-	#echo "ANSIBLE_COLLECTIONS_PATH=$${ANSIBLE_COLLECTIONS_PATH}"; \
-	#uv run ansible-galaxy collection install --force-with-deps ~/.ansible/collections; \
 	if [ "$(word 2,$(MAKECMDGOALS))" = "" ]; then \
 		echo "Usage: make molecule -- [MOLECULE_ARGS...]"; \
 		exit 1; \
@@ -114,6 +106,11 @@ molecule: link-collection
 	echo "--- Testing collection jaxzin.infra with command molecule [$$args] ---"; \
 	uv run ansible-galaxy collection install jaxzin.infra -p ./collections; \
 	UV_LINK_MODE=copy uv run -v --directory $(EXTENSIONS_PATH) molecule $$args
+
+.PHONY: test
+test: link-collection
+	@echo "Running tests for the Ansible collection..."; \
+	UV_LINK_MODE=copy uv run -v --directory $(EXTENSIONS_PATH) molecule test
 
 # Prevent additional args from being treated as targets.
 %:
