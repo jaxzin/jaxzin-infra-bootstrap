@@ -1,7 +1,7 @@
 // To fully customize your devcontainer, see https://containers.dev/implementors/json_reference
 {
   "name": "Ansible Development",
-  "image": "ghcr.io/jaxzin/jaxzin-infra-bootstrap:${localEnv:GITHUB_REF_NAME}",
+  "image": "ghcr.io/jaxzin/jaxzin-infra-bootstrap:dev-${localEnv:GITHUB_REF_NAME:main}",
 
   // Explicitly set the workspace mount point to ensure it is consistent across devcontainer tools.
   // This is useful for the post-create script and other tools that expect a specific mount point.
