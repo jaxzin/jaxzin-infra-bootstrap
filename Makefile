@@ -98,19 +98,19 @@ link-collection:
 
 .PHONY: molecule
 molecule: link-collection
-	if [ "$(word 2,$(MAKECMDGOALS))" = "" ]; then \
+	@if [ "$(word 2,$(MAKECMDGOALS))" = "" ]; then \
 		echo "Usage: make molecule -- [MOLECULE_ARGS...]"; \
 		exit 1; \
 	fi; \
 	args="$(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))"; \
 	echo "--- Testing collection jaxzin.infra with command molecule [$$args] ---"; \
 	uv run ansible-galaxy collection install jaxzin.infra -p ./collections; \
-	UV_LINK_MODE=copy uv run -v --directory $(EXTENSIONS_PATH) molecule $$args
+	UV_LINK_MODE=copy uv run --directory $(EXTENSIONS_PATH) molecule $$args
 
 .PHONY: test
 test: link-collection
 	@echo "Running tests for the Ansible collection..."; \
-	UV_LINK_MODE=copy uv run -v --directory $(EXTENSIONS_PATH) molecule test
+	UV_LINK_MODE=copy uv run --directory $(EXTENSIONS_PATH) molecule test
 
 # Prevent additional args from being treated as targets.
 %:
