@@ -55,6 +55,12 @@ jobs:
         with:
           driver: docker-container
 
+      # https://github.com/marketplace/actions/setup-node-js-environment
+      - name: Setup Node Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
       # see https://github.com/ndigitals/wp-dev-container/blob/497061211de93ee03b25186997e9679a8154ade5/.github/workflows/release-build.yml
       - name: Pre-build devcontainer image
         uses: devcontainers/ci@v0.3
