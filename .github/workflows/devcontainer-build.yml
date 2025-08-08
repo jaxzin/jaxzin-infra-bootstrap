@@ -21,15 +21,9 @@ jobs:
       matrix:
         builder:
           - ubuntu-22.04
-          - self-hosted
         platform:
           - amd64
           - arm64
-        exclude:
-          - builder: ubuntu-22.04
-            platform: arm64
-          - builder: self-hosted
-            platform: amd64
 
     runs-on:
       - ${{ matrix.builder }}
