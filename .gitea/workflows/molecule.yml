@@ -30,34 +30,10 @@ jobs:
           while ! docker info >/dev/null 2>&1; do sleep 1; done
         env:
           DOCKER_TLS_CERTDIR: ""
-#      - name: Install curl
-#        run: |
-#          which apk && apk add --no-cache curl || echo "apk not available"
-#      # Install node.js and npm
-#      - name: Install Node (Alpine-compatible)
-#        run: |
-#          NODE_VERSION=18.17.1
-#          ARCH=x64
-#          curl -fsSL https://unofficial-builds.nodejs.org/download/release/v$NODE_VERSION/node-v$NODE_VERSION-linux-musl-$ARCH.tar.gz -o node.tar.gz
-#          mkdir -p $HOME/.local/node
-#          tar -xzf node.tar.gz -C $HOME/.local/node --strip-components=1
-#          echo "$HOME/.local/node/bin" >> $GITHUB_PATH
-#      # Install node.js and npm
-#      - name: Install Node.js and npm
-#        uses: actions/setup-node@v3
-#        with:
-#          node-version: '18'
-#
+
       - uses: actions/checkout@v4
 
-#      - name: Resolve DinD container IP
-#        id: get-dind-ip
-#        run: |
-#          ip=$(getent hosts docker | awk '{ print $1 }')
-#          echo "DOCKER_HOST=tcp://$ip:2375" >> $GITHUB_ENV
-#          echo "Resolved DOCKER_HOST=tcp://$ip:2375"
-
-      - name: Build Devcontainer Image
+      - name: Run Molecule Tests inside DevContainer
         uses: devcontainers/ci@v0.3
         env:
           GITHUB_REF_NAME: ${{ gitea.ref_name }}
