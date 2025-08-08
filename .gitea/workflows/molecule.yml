@@ -39,7 +39,7 @@ jobs:
           GITHUB_REF_NAME: ${{ gitea.ref_name }}
         with:
           imageName: ghcr.io/jaxzin/jaxzin-infra-bootstrap
-          imageTag: dev, dev-${{ github.ref_name }}, dev-${{ github.sha }}
+          imageTag: dev
           cacheFrom: ghcr.io/jaxzin/jaxzin-infra-bootstrap:dev
           push: always
           runCmd: |
