@@ -13,20 +13,9 @@ permissions:
 jobs:
   build-prepush:
     if: github.event_name != 'pull_request' # pull requests tokens are read-only
+    runs-on: ubuntu-24.04
     outputs:
       image_ref: ${{ steps.img.outputs.image }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        builder:
-          - ubuntu-22.04
-        platform:
-          - amd64
-          - arm64
-
-    runs-on:
-      - ${{ matrix.builder }}
 
     steps:
       - uses: actions/checkout@v4
@@ -57,72 +46,15 @@ jobs:
 
       # see https://github.com/ndigitals/wp-dev-container/blob/497061211de93ee03b25186997e9679a8154ade5/.github/workflows/release-build.yml
       - name: Pre-build devcontainer image
+        id: img
         uses: devcontainers/ci@v0.3
-        if: matrix.platform == 'amd64'
         env:
           # see: https://github.com/devcontainers/ci/issues/191#issuecomment-1603857155
           BUILDX_NO_DEFAULT_ATTESTATIONS: true
         with:
           imageName: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}
-          imageTag: dev, dev-${{ github.ref_name }}, dev-${{ github.ref_name }}-${{ matrix.platform }}
+          imageTag: dev, dev-${{ github.ref_name }}
           cacheFrom: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:dev-main
           push: always
-          platform: linux/${{ matrix.platform }}
+          platform: linux/amd64,linux/arm64
           skipContainerUserIdUpdate: true
-
-      - name: Pre-build devcontainer image
-        uses: devcontainers/ci@v0.3
-        if: matrix.platform == 'arm64'
-        env:
-          # see: https://github.com/devcontainers/ci/issues/191#issuecomment-1603857155
-          BUILDX_NO_DEFAULT_ATTESTATIONS: true
-        with:
-          imageName: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}
-          imageTag: dev-${{ github.ref_name }}-${{ matrix.platform }}
-          cacheFrom: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:dev-main
-          push: always
-          platform: linux/${{ matrix.platform }}
-          skipContainerUserIdUpdate: true
-
-  upload:
-    name: Upload Images
-    needs: build-prepush
-    permissions:
-      contents: read
-      packages: write
-
-    runs-on: ubuntu-latest
-
-    steps:
-      # https://github.com/marketplace/actions/docker-setup-buildx
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # https://github.com/marketplace/actions/docker-login
-      - name: Login to GitHub Packages
-        uses: docker/login-action@v3
-        with:
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-          logout: false
-
-      # https://github.com/marketplace/actions/docker-metadata-action
-      - name: Docker Metadata
-        uses: docker/metadata-action@v5
-        id: metadata
-        with:
-          tags: type=raw,value=dev-${{ github.ref_name }}
-
-      - name: Inspect Images
-        run: |
-          docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:dev-${{ github.ref_name }}-amd64
-          docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:dev-${{ github.ref_name }}-arm64
-
-      - name: Create Manifest List and Push
-        run: |
-          docker buildx imagetools create -t ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:dev-${{ github.ref_name }} \
-          --append ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:dev-${{ github.ref_name }}-arm64
-
-      - name: Inspect Manifest List
-        run: |
-          docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:dev-${{ github.ref_name }}
