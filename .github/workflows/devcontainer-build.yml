@@ -52,9 +52,7 @@ jobs:
           # see: https://github.com/devcontainers/ci/issues/191#issuecomment-1603857155
           BUILDX_NO_DEFAULT_ATTESTATIONS: true
         with:
-          imageName: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}
-          imageTag: dev, dev-${{ github.ref_name }}
-          cacheFrom: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:dev-main
+          imageName: ghcr.io/${{ github.repository }}
+          cacheFrom: ghcr.io/${{ github.repository }}
           push: always
           platform: linux/amd64,linux/arm64
-          skipContainerUserIdUpdate: true
