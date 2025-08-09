@@ -53,6 +53,7 @@ jobs:
           BUILDX_NO_DEFAULT_ATTESTATIONS: true
         with:
           imageName: ghcr.io/${{ github.repository }}
-          cacheFrom: ghcr.io/${{ github.repository }}
+          imageTag: ${{ github.ref_name == github.event.repository.default_branch && 'dev' || format('dev-{0}', github.ref_name) }}
+          cacheFrom: ghcr.io/${{ github.repository }}:dev
           push: always
           platform: linux/amd64,linux/arm64
