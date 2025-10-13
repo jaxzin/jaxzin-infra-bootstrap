@@ -33,7 +33,7 @@ jobs:
           fi
 
       - name: Run Restore Playbook
-        uses: dawidd6/action-ansible-playbook@v4
+        uses: dawidd6/action-ansible-playbook@v5
         with:
           playbook: gitea-restore.yml
           directory: ./playbooks
