@@ -30,7 +30,7 @@ jobs:
       SSH_KEY: ${{ secrets.SSH_KEY }}
     steps:
       - name: Checkout IaC
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Ansible in a venv if needed
         run: |
