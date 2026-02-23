@@ -1,33 +1,81 @@
 ---
+# =============================================================================
+# Domain configuration (from environment — never hardcode domains in this repo)
+# =============================================================================
+tailscale_tailnet: "{{ lookup('ansible.builtin.env', 'TS_TAILNET') }}"
+lan_domain: "{{ lookup('ansible.builtin.env', 'NAS_HOST') }}"
+
+# =============================================================================
+# Tailscale sidecar configuration
+# =============================================================================
+tailscale_enabled: true
+tailscale_image: "tailscale/tailscale:latest"
+tailscale_authkey: "{{ lookup('ansible.builtin.env', 'TS_AUTHKEY') }}"
+tailscale_network_name: "{{ gitea_network_name }}"
+tailscale_data_path: "{{ gitea_data_path }}/tailscale"
+# Gitea sidecar
+tailscale_gitea_container_name: "tailscale-gitea"
+tailscale_gitea_hostname: "gitea"
+tailscale_gitea_state_dir: "{{ tailscale_data_path }}/gitea-state"
+tailscale_gitea_serve_config_dest: "{{ tailscale_data_path }}/gitea-serve.json"
+# Runner sidecar
+tailscale_runner_container_name: "tailscale-runner"
+tailscale_runner_hostname: "gitea-runner"
+tailscale_runner_state_dir: "{{ tailscale_data_path }}/runner-state"
+
+# =============================================================================
+# DNS / certificate management
+# =============================================================================
 dnsimple_oauth_token: "{{ lookup('ansible.builtin.env', 'DNSIMPLE_OAUTH_TOKEN') }}"
 dnsimple_endpoint: "{{ lookup('ansible.builtin.env', 'DNSIMPLE_ENDPOINT') | default('https://api.dnsimple.com', true) }}"
 certbot_email: "{{ lookup('ansible.builtin.env', 'CERTBOT_EMAIL') }}"
+certbot_domain: "{{ lan_domain }}"
 certbot_command_args: [
   "certonly",
   "--dns-dnsimple",
-  "-d", "{{ gitea_domain }}",
+  "-d", "{{ certbot_domain }}",
   "--email", "{{ certbot_email }}",
   "--agree-tos",
   "--no-eff-email",
   "--server", "https://acme-v02.api.letsencrypt.org/directory"
 ]
-# Domain and data paths
-gitea_domain: "nas.lan.jaxzin.com"
+
+# =============================================================================
+# Gitea configuration
+# =============================================================================
+# Domain & networking
+gitea_domain: "gitea.{{ tailscale_tailnet }}"
+gitea_protocol: "https"
+gitea_root_url: "https://gitea.{{ tailscale_tailnet }}/"
 gitea_port: "8443"
+gitea_lan_port: "{{ gitea_port }}"
+gitea_ssh_port: "22"
+gitea_ssh_host_port: "22222"
+gitea_ssh_domain: "gitea.{{ tailscale_tailnet }}"
 gitea_network_name: "gitea-net"
-gitea_ssh_port: "22222"
+
+# Internal API URL for Ansible provisioning (via sidecar host port mapping)
+gitea_api_base_url: "http://127.0.0.1:{{ gitea_lan_port }}"
+
+# Runner instance URL (via tailnet)
+gitea_instance_url: "https://gitea.{{ tailscale_tailnet }}"
+
+# Data paths
 gitea_data_path: "/volume1/docker/gitea"
 gitea_runner_data_path: "{{ gitea_data_path }}/gitea-runner"
 certbot_data_path: "/volume1/docker/certbot"
+
 # Gitea configuration paths
 gitea_app_ini_path_host: "{{ gitea_data_path }}/conf/app.ini"
 gitea_app_ini_path_container: "/etc/gitea/app.ini"
+
 # Docker images
 gitea_image_tag: "1.24.2-rootless"
 gitea_image: "gitea/gitea:{{ gitea_image_tag }}"
 gitea_db_image: "mysql:8"
 gitea_runner_image_tag: "0.2.12-dind"
 gitea_runner_image: "gitea/act_runner:{{ gitea_runner_image_tag }}"
+
 # Database credentials (from environment)
 gitea_db_name: "gitea"
 gitea_db_user: "gitea"
@@ -35,12 +83,15 @@ gitea_db_password: "{{ lookup('ansible.builtin.env','GITEA_DB_PASSWORD') }}"
 gitea_admin_username: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_USERNAME') }}"
 gitea_admin_password: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_PASSWORD') }}"
 gitea_admin_email: "{{ lookup('ansible.builtin.env','GITEA_ADMIN_EMAIL') }}"
+
 # SSL/TLS certificate management
 dsm_cert_name: nas-lan
 discord_webhook: "{{ lookup('ansible.builtin.env', 'DISCORD_WEBHOOK') }}"
+
 # Internal token for Gitea API
 gitea_secrets_path: "{{ gitea_data_path }}/conf/secrets"
 gitea_internal_token_path: "{{ gitea_secrets_path }}/internal_token"
 gitea_internal_token: "{{ lookup('password', '/dev/null', length=32, chars='ascii_letters,digits') }}"
+
 # JWT secret for Gitea OAuth2
 gitea_jwt_secret: "{{ lookup('password', '/dev/null', length=64, chars='ascii_letters,digits') }}"

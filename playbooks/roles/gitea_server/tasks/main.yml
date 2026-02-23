@@ -98,8 +98,28 @@
     mode: '0640'
   notify: Restart Gitea
 
-- name: Deploy Gitea container
-  # Launch the Gitea application container
+# --- Gitea container deployment (conditional on Tailscale) ---
+
+- name: Deploy Gitea container (with Tailscale sidecar)
+  community.docker.docker_container:
+    name: gitea
+    image: "{{ gitea_image }}"
+    state: started
+    restart_policy: always
+    network_mode: "container:{{ tailscale_gitea_container_name }}"
+    env:
+      USER_UID: "1000"
+      USER_GID: "1000"
+    volumes:
+      - "{{ gitea_data_path }}/gitea:/var/lib/gitea"
+      - "{{ gitea_app_ini_path_host }}:{{ gitea_app_ini_path_container }}"
+      - "{{ gitea_data_path }}/conf/secrets:/etc/gitea/secrets:ro"
+      - "{{ certbot_data_path }}/certs:/etc/letsencrypt:ro"
+  when: tailscale_enabled | default(false) | bool
+  tags: gitea
+  notify: Restart Gitea
+
+- name: Deploy Gitea container (standalone)
   community.docker.docker_container:
     name: gitea
     image: "{{ gitea_image }}"
@@ -118,6 +138,7 @@
       - "{{ gitea_app_ini_path_host }}:{{ gitea_app_ini_path_container }}"
       - "{{ gitea_data_path }}/conf/secrets:/etc/gitea/secrets:ro"
       - "{{ certbot_data_path }}/certs:/etc/letsencrypt:ro"
+  when: not (tailscale_enabled | default(false) | bool)
   tags: gitea
   notify: Restart Gitea
 
@@ -164,6 +185,17 @@
     changed_when: admin_create.rc == 0
   when: not ansible_check_mode
 
+- name: Wait for Gitea to be ready
+  community.docker.docker_container_exec:
+    container: gitea
+    command: nc -z 127.0.0.1 3000
+  register: web_check_result
+  until: web_check_result.rc is defined and web_check_result.rc == 0
+  retries: 15
+  delay: 5
+  changed_when: false
+  when: not ansible_check_mode
+
 - name: Check if Gitea API token is already persisted
   stat:
     path: "{{ gitea_data_path }}/conf/api_token.txt"
@@ -186,7 +218,7 @@
   block:
     - name: Create Gitea API token via API
       ansible.builtin.uri:
-        url: "https://{{ gitea_domain }}:{{ gitea_port }}/api/v1/users/{{ gitea_admin_username }}/tokens"
+        url: "{{ gitea_api_base_url }}/api/v1/users/{{ gitea_admin_username }}/tokens"
         method: POST
         user: "{{ gitea_admin_username }}"
         password: "{{ gitea_admin_password }}"

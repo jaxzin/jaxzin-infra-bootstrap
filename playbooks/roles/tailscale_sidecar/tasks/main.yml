@@ -1,0 +1,60 @@
+---
+# All tasks guarded by tailscale_enabled so the role is a no-op in tests
+- name: Create Tailscale state directory
+  file:
+    path: "{{ tailscale_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when: tailscale_enabled | bool
+
+- name: Deploy Tailscale Serve configuration
+  template:
+    src: "{{ tailscale_serve_config_src }}"
+    dest: "{{ tailscale_serve_config_dest }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when: tailscale_enabled | bool and tailscale_serve_enabled | bool
+
+- name: Deploy Tailscale sidecar container
+  community.docker.docker_container:
+    name: "{{ tailscale_container_name }}"
+    image: "{{ tailscale_image }}"
+    state: started
+    restart_policy: always
+    networks:
+      - name: "{{ tailscale_network_name }}"
+    ports: "{{ tailscale_host_ports | default([], true) }}"
+    capabilities:
+      - NET_ADMIN
+      - SYS_MODULE
+    env:
+      TS_HOSTNAME: "{{ tailscale_hostname }}"
+      TS_AUTHKEY: "{{ tailscale_authkey }}"
+      TS_STATE_DIR: "/var/lib/tailscale"
+      TS_USERSPACE: "{{ tailscale_userspace_networking | default('false') }}"
+      TS_SERVE_CONFIG: "{{ '/etc/tailscale/serve.json' if (tailscale_serve_enabled | bool) else omit }}"
+      TS_EXTRA_ARGS: "{{ tailscale_extra_args | default(omit, true) }}"
+    volumes: >-
+      {{
+        [tailscale_state_dir + ':/var/lib/tailscale',
+         '/dev/net/tun:/dev/net/tun']
+        + ([tailscale_serve_config_dest + ':/etc/tailscale/serve.json:ro']
+           if (tailscale_serve_enabled | bool) else [])
+      }}
+  when: tailscale_enabled | bool
+
+- name: Wait for Tailscale to connect to tailnet
+  community.docker.docker_container_exec:
+    container: "{{ tailscale_container_name }}"
+    command: tailscale status --json
+  register: ts_status
+  until: >
+    ts_status.rc is defined and ts_status.rc == 0 and
+    (ts_status.stdout | from_json).BackendState == "Running"
+  retries: 30
+  delay: 2
+  changed_when: false
+  when: tailscale_enabled | bool and not ansible_check_mode

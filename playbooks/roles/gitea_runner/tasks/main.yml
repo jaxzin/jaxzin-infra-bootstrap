@@ -31,7 +31,7 @@
   block:
     - name: Get Gitea runner registration token
       uri:
-        url: "https://{{ gitea_domain }}:{{ gitea_port }}/api/v1/admin/runners/registration-token"
+        url: "{{ gitea_api_base_url }}/api/v1/admin/runners/registration-token"
         method: GET
         headers:
           Authorization: "token {{ gitea_api_token }}"
@@ -60,7 +60,29 @@
   notify:
     - Restart Gitea runner
 
-- name: Deploy Gitea runner container
+# --- Runner container deployment (conditional on Tailscale) ---
+
+- name: Deploy Gitea runner container (with Tailscale sidecar)
+  community.docker.docker_container:
+    name: gitea-runner
+    image: "{{ gitea_runner_image }}"
+    state: started
+    restart_policy: always
+    network_mode: "container:{{ tailscale_runner_container_name }}"
+    dns_opts:
+      - "ndots:0"
+    privileged: true
+    env:
+      CONFIG_FILE: "/data/conf/config.yml"
+      GITEA_INSTANCE_URL: "{{ gitea_instance_url }}"
+      GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
+      GITEA_RUNNER_NAME: "nas-runner"
+      DOCKER_INSECURE_NO_IPTABLES_RAW: "1" # needed for Docker-in-Docker on the Synology DSM which does not include iptables_raw kernel module
+    volumes:
+      - "{{ gitea_runner_data_path }}:/data"
+  when: tailscale_enabled | default(false) | bool
+
+- name: Deploy Gitea runner container (standalone)
   community.docker.docker_container:
     name: gitea-runner
     image: "{{ gitea_runner_image }}"
@@ -73,9 +95,10 @@
     privileged: true
     env:
       CONFIG_FILE: "/data/conf/config.yml"
-      GITEA_INSTANCE_URL: "https://{{ gitea_domain }}:{{ gitea_port }}"
+      GITEA_INSTANCE_URL: "{{ gitea_instance_url | default('https://' + gitea_domain + ':' + gitea_port) }}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
       GITEA_RUNNER_NAME: "nas-runner"
       DOCKER_INSECURE_NO_IPTABLES_RAW: "1" # needed for Docker-in-Docker on the Synology DSM which does not include iptables_raw kernel module
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
+  when: not (tailscale_enabled | default(false) | bool)

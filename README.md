@@ -1,19 +1,20 @@
 # Bootstrap IaC for the Jackson Family Self-Hosted Infrastructure
 
 Welcome to **my** bootstrap repository for The Jackson Family’s self-hosted infrastructure.
-I use this repo to bootstrap and maintain the core foundation for my home-network Infrastructure as Code (IaC)—installing Gitea on a Synology 
-NAS, and restoring it's backup from an off-site backup on Backblaze. 
+I use this repo to bootstrap and maintain the core foundation for my home-network Infrastructure as Code (IaC)—installing Gitea on a Synology
+NAS, and restoring it’s backup from an off-site backup on Backblaze.
 
 It is not monolithically responsible for _all_ (IaC) on my personal network. The Gitea recovery will restore additional
-IaC CI/CD repos and workflows. This is meant to ensure I always have a reliable disaster-recovery path. 
+IaC CI/CD repos and workflows. This is meant to ensure I always have a reliable disaster-recovery path.
 
 The only prerequisites to performing a disaster recovery are:
 1. There is an available self-hosted Github runner on the home network and...
 2. that runner is attached to the mirror of this repo on Github.com and...
 3. there is a Synology NAS available on the home network...
-4. with the hostname defined in the Github repo's secret `SSH_NAS_HOST` and...
+4. with the hostname defined in the Github repo’s variable `NAS_HOST` and...
 5. the "Container Manager" package (aka Docker) is compatible with this NAS...
-6. and there is a latest backup of the Gitea data on Backblaze in the `B2_BUCKET_NAME`
+6. there is a latest backup of the Gitea data on Backblaze in the `B2_BUCKET_NAME`...
+7. and the Tailscale auth key and tailnet domain are configured in the repo’s secrets/variables
 
 ---
 
@@ -22,16 +23,28 @@ The only prerequisites to performing a disaster recovery are:
 ```text
 .gitea/
 └── workflows/
-    └── deploy.yml           # Daily deployments via Gitea Actions
+    └── deploy.yml              # Daily deployments via Gitea Actions
 .github/
 ├── workflows/
-│   ├── bootstrap.yml        # GitHub-triggered DR bootstrap (recovery phase 1)
-│   ├── common-bootstrap.yml # Core provisioning steps (reusable)
-│   ├── health-check.yml     # Daily dry run of DR bootstrap with Discord alert
-│   ├── mirror-health.yml    # Daily mirror-health check with Discord alert
-│   └── restore.yml          # GitHub-triggered DR restore (recovery phase 2, 🛑 DANGER, overwrites Gitea data)
-playbooks/                   # My Ansible playbooks & roles (NAS, Gitea, DNS, certs)
-Makefile                     # Makefile for common tasks
+│   ├── bootstrap.yml           # GitHub-triggered DR bootstrap (recovery phase 1)
+│   ├── common-bootstrap.yml    # Core provisioning steps (reusable)
+│   ├── health-check.yml        # Daily dry run of DR bootstrap with Discord alert
+│   ├── mirror-health.yml       # Daily mirror-health check with Discord alert
+│   └── restore.yml             # GitHub-triggered DR restore (recovery phase 2, 🛑 DANGER)
+playbooks/
+├── roles/
+│   ├── certbot/                # Let’s Encrypt certificate management
+│   ├── gitea_backup/           # Gitea backup to Backblaze B2
+│   ├── gitea_runner/           # Gitea Actions runner deployment
+│   ├── gitea_server/           # Gitea server + MySQL deployment
+│   └── tailscale_sidecar/      # Reusable Tailscale sidecar container
+├── templates/
+│   └── app.ini.j2              # Gitea configuration template
+├── vars/
+│   └── main.yml                # All playbook variables
+├── gitea-deploy.yml            # Main deployment playbook
+└── gitea-restore.yml           # Restore playbook
+Makefile                        # Makefile for common tasks
 ```
 ---
 
@@ -45,6 +58,29 @@ Makefile                     # Makefile for common tasks
 ---
 
 ## Architecture Diagrams
+
+### Container Networking (Tailscale Sidecar Pattern)
+
+```mermaid
+flowchart TB
+    subgraph Tailnet["Tailscale Tailnet"]
+        TG_TS["tailscale-gitea<br/>(TS_SERVE: HTTPS → :3000)"]
+        TR_TS["tailscale-runner<br/>(tailnet access only)"]
+    end
+    subgraph DockerNet["gitea-net (Docker Bridge)"]
+        TG_TS --- |"network_mode: container"| Gitea["gitea<br/>(HTTPS :3000, SSH :22)"]
+        DB["gitea-db<br/>(MySQL :3306)"]
+        TR_TS --- |"network_mode: container"| Runner["gitea-runner<br/>(Act Runner)"]
+    end
+    subgraph LAN["LAN Fallback"]
+        LAN_HTTPS["Host :8443 → :3000"]
+        LAN_SSH["Host :22222 → :22"]
+    end
+    TG_TS --> LAN_HTTPS
+    TG_TS --> LAN_SSH
+    Gitea --> |"gitea-db:3306"| DB
+    Runner --> |"https://gitea.tailnet"| TG_TS
+```
 
 ### Normal Operation (Happy Path)
 
@@ -63,9 +99,10 @@ flowchart TB
         H --> G
     end
     C --> D[Synology NAS Configuration]
-    D --> D1[Gitea Server]
-    D --> D2[Certbot]
-    D --> D3[Gitea Runner]
+    D --> D1[Tailscale Sidecars]
+    D --> D2[Gitea Server]
+    D --> D3[Certbot]
+    D --> D4[Gitea Runner]
 ```
 
 ### Failure & Recovery Mode
@@ -82,6 +119,7 @@ flowchart TB
         R --> M[SSH to Synology NAS]
         M --> N[Fetch & Restore Backup]
         N --> P[Services Back Online]
+        P --> P0[Tailscale Sidecars]
         P --> P1[Gitea Server]
         P --> P2[Certbot]
         P --> P3[Gitea Runner]
@@ -93,8 +131,46 @@ flowchart TB
 
 ## Contributing
 
-Details on how to contribute to this project, including how to set up a local development environment, 
+Details on how to contribute to this project, including how to set up a local development environment,
 can be found in the [CONTRIBUTING.md](CONTRIBUTING.md) file.
+
+---
+
+## Tailscale Integration
+
+Gitea and the Gitea Actions runner are each paired with a [Tailscale](https://tailscale.com) sidecar container that places them on your private Tailscale tailnet. This provides secure, zero-config access to Gitea from any device on your tailnet without exposing it to the public internet.
+
+### How It Works
+
+Each application container shares its network namespace with a `tailscale/tailscale` sidecar container using Docker's `network_mode: container:` option. The sidecar handles Tailscale connectivity while the application runs its services as if they were local. Both sidecars are placed on the `gitea-net` Docker bridge network, which allows Gitea to reach MySQL (`gitea-db:3306`) while keeping MySQL itself off the tailnet entirely.
+
+[Tailscale Serve](https://tailscale.com/kb/1312/serve) provides HTTPS on the tailnet for Gitea — it proxies `https://gitea.<your-tailnet>:443` to Gitea's HTTPS port inside the shared network namespace. Gitea serves HTTPS using Let's Encrypt certs (managed by certbot), and Tailscale Serve re-terminates with its own MagicDNS certificate for the tailnet hostname.
+
+### LAN Fallback
+
+Gitea is also accessible directly on the LAN for cases where Tailscale is unavailable:
+- **HTTPS**: `https://<NAS-IP>:8443` (using Let's Encrypt certs via certbot)
+- **SSH**: `ssh://<NAS-IP>:22222` (for Git over SSH on the LAN)
+
+### Using This Repo as a Template
+
+To set up Tailscale for your own fork:
+
+1. Create a [Tailscale account](https://login.tailscale.com) and tailnet if you don't have one.
+2. Generate a **reusable, non-ephemeral** auth key at Settings → Keys in the Tailscale admin console.
+3. Set the `TS_AUTHKEY` **secret** and `TS_TAILNET` **variable** in your GitHub repo settings (see the table below).
+4. Run the bootstrap workflow — Gitea will be available at `https://gitea.<your-tailnet>` from any tailnet device.
+5. The runner will appear as `gitea-runner` on your tailnet.
+
+The certbot certificate domain is derived from the existing `NAS_HOST` variable, so no additional variable is needed for LAN access.
+
+### Disabling Tailscale
+
+Set `tailscale_enabled: false` in `playbooks/vars/main.yml` to skip all Tailscale tasks and use legacy direct Docker networking with Let's Encrypt HTTPS certificates instead.
+
+### Synology NAS Note
+
+If your Synology NAS also runs the Tailscale package at the OS level, the sidecar containers operate independently — they have their own Tailscale identities and state and do not depend on the host's Tailscale installation.
 
 ---
 
@@ -122,27 +198,29 @@ environment in your own repository settings.
 
 In GitHub (Settings → Secrets and variables → Actions → Secrets):
 
-| Secret                | Value/Purpose              |
-| --------------------- | -------------------------- |
-| `SSH_KEY`             | SSH private key for NAS    |
-| `NAS_SSH_PASSWORD`    | NAS SSH user password      |
-| `B2_APPLICATION_KEY`    | Backblaze B2 Application Key    |
-| `B2_APPLICATION_KEY_ID` | Backblaze B2 Application Key ID |
-| `B2_BUCKET_NAME`      | Backblaze B2 Bucket Name   |
-| `DISCORD_WEBHOOK`     | Discord webhook for alerts |
-| `DNSIMPLE_OAUTH_TOKEN`| DNSimple OAuth Token       |
-| `GITEA_ADMIN_PASSWORD`| Gitea Admin User Password  |
-| `GITEA_DB_PASSWORD`   | Gitea Database Password    |
+| Secret                | Value/Purpose                                      |
+| --------------------- | -------------------------------------------------- |
+| `SSH_KEY`             | SSH private key for NAS                            |
+| `NAS_SSH_PASSWORD`    | NAS SSH user password                              |
+| `B2_APPLICATION_KEY`    | Backblaze B2 Application Key                     |
+| `B2_APPLICATION_KEY_ID` | Backblaze B2 Application Key ID                  |
+| `B2_BUCKET_NAME`      | Backblaze B2 Bucket Name                           |
+| `DISCORD_WEBHOOK`     | Discord webhook for alerts                         |
+| `DNSIMPLE_OAUTH_TOKEN`| DNSimple OAuth Token                               |
+| `GITEA_ADMIN_PASSWORD`| Gitea Admin User Password                          |
+| `GITEA_DB_PASSWORD`   | Gitea Database Password                            |
+| `TS_AUTHKEY`          | Tailscale auth key (reusable, non-ephemeral)       |
 
 In GitHub (Settings → Secrets and variables → Actions → Variables):
 
-| Variable              | Value/Purpose              |
-| --------------------- | -------------------------- |
-| `CERTBOT_EMAIL`       | Certbot Email Address      |
-| `GITEA_ADMIN_USERNAME`| Gitea Admin Username       |
-| `GITEA_ADMIN_EMAIL`   | Gitea Admin Email          |
-| `NAS_HOST`            | FQDN/IP of NAS             |
-| `NAS_SSH_USER`        | NAS SSH user               |
+| Variable              | Value/Purpose                                      |
+| --------------------- | -------------------------------------------------- |
+| `CERTBOT_EMAIL`       | Certbot Email Address                              |
+| `GITEA_ADMIN_USERNAME`| Gitea Admin Username                               |
+| `GITEA_ADMIN_EMAIL`   | Gitea Admin Email                                  |
+| `NAS_HOST`            | FQDN/IP of NAS                                     |
+| `NAS_SSH_USER`        | NAS SSH user                                       |
+| `TS_TAILNET`          | Your Tailscale tailnet domain (e.g. `your-tailnet.ts.net`) |
 
 ### 3. Self-hosting a GitHub Runner
 
@@ -178,7 +256,8 @@ To then begin self-hosting the bootstrap CI/CD, you can follow these steps:
     - Click **Add Mirror**.
 #### 4.3. **Configure Gitea Secrets and Variables**:
    - Go to **Settings** → **Actions** in Gitea.
-   - Add the same secrets and variables as you did for GitHub (see above).
+   - Add the same secrets and variables as you did for GitHub (see above), including
+     `TS_AUTHKEY` and `TS_TAILNET`.
 ---
 
 ## Workflow Details
@@ -215,19 +294,21 @@ Use this workflow to bootstrap the disaster recovery process.
 
 ### Gitea Runner vs GitHub Runner
 
-This bootstrap process also installs and configures a Gitea runner on the Synology NAS. This runner is responsible for 
-executing CI/CD workflows defined in your Gitea repositories for the majority of my home network's IaC. The 
-GitHub runner is used for disaster recovery (DR) workflows only. The Gitea server, Certbot, and Gitea runner are all deployed as Docker containers.
+This bootstrap process also installs and configures a Gitea runner on the Synology NAS. This runner is responsible for
+executing CI/CD workflows defined in your Gitea repositories for the majority of my home network's IaC. The
+GitHub runner is used for disaster recovery (DR) workflows only. The Gitea server, Certbot, Gitea runner, and their Tailscale sidecars are all deployed as Docker containers.
 
 ---
 
 ## Performing Disaster Recovery from GitHub
 
-1. Provision replacement NAS with host name is `nas`.
+1. Provision replacement NAS with hostname matching the `NAS_HOST` variable.
 2. Ensure off-NAS GitHub runner can SSH in.
 3. On GitHub, run Actions → Bootstrap; then Actions → Restore Gitea Data.
 4. Approve if safe.
 5. Restore then automatically runs, unarchiving backup and restarting services.
+
+> **Note:** The bootstrap playbook deploys the Tailscale sidecar containers before Gitea and the runner. After a restore, the sidecars must be running before Gitea can start because Gitea depends on the sidecar's network namespace (`network_mode: container:`). The playbook handles this ordering automatically.
 
 ---
 

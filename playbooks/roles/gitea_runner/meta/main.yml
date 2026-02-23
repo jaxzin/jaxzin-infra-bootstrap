@@ -41,3 +41,21 @@ argument_specs:
       gitea_runner_config_file:
         type: "str"
         default: "{{ gitea_runner_config_file_parent }}/config.yml"
+      gitea_api_base_url:
+        type: "str"
+        required: true
+        description: "Base URL for Ansible API calls (e.g. http://127.0.0.1:8443)."
+      gitea_instance_url:
+        type: "str"
+        required: false
+        description: "URL for the runner to connect to Gitea (defaults to https://domain:port)."
+      tailscale_enabled:
+        type: "bool"
+        required: false
+        default: false
+        description: "When true, use network_mode container sharing with Tailscale sidecar."
+      tailscale_runner_container_name:
+        type: "str"
+        required: false
+        default: "tailscale-runner"
+        description: "Name of the Tailscale sidecar container for the runner."
