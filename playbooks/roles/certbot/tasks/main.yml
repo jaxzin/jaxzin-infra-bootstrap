@@ -53,7 +53,7 @@
 - name: Run initial certificate acquisition
   command: "{{ certbot_data_path }}/scripts/renew-cert.sh"
   args:
-    creates: "{{ certbot_data_path }}/certs/live/{{ gitea_domain }}/fullchain.pem"
+    creates: "{{ certbot_data_path }}/certs/live/{{ certbot_domain }}/fullchain.pem"
   environment:
     DNSIMPLE_OAUTH_TOKEN: "{{ dnsimple_oauth_token }}"
     DNSIMPLE_ENDPOINT: "{{ dnsimple_endpoint }}"
