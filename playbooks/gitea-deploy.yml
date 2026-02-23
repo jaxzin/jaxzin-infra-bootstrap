@@ -30,7 +30,7 @@
         - gitea_admin_email
         - gitea_db_password
         - tailscale_tailnet
-        - lan_domain  # derived from NAS_HOST
+        - lan_domain
 
     - name: Validate Tailscale auth key
       assert:

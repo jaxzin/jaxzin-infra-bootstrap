@@ -6,7 +6,7 @@
 
 - name: Ensure required directories exist
   ansible.builtin.file:
-    path: "/volume1/docker/gitea/{{ item }}"
+    path: "{{ gitea_data_path }}/{{ item }}"
     state: directory
     mode: '0755'
   loop:
@@ -17,7 +17,7 @@
 - name: Create secure B2 credentials file
   ansible.builtin.template:
     src: b2_credentials.env.j2
-    dest: "/volume1/docker/gitea/scripts/b2_credentials.env"
+    dest: "{{ gitea_data_path }}/scripts/b2_credentials.env"
     owner: root
     group: root
     mode: '0600' # Only root can read/write
@@ -26,7 +26,7 @@
 - name: Copy Gitea dump script to NAS
   ansible.builtin.template:
     src: gitea_dump.sh.j2
-    dest: "/volume1/docker/gitea/scripts/gitea_dump.sh"
+    dest: "{{ gitea_data_path }}/scripts/gitea_dump.sh"
     mode: '0755'
 
 - name: Schedule Gitea dump and B2 upload script
@@ -36,4 +36,4 @@
     minute: "0"
     hour: "2"
     user: "root"
-    job: "/volume1/docker/gitea/scripts/gitea_dump.sh"
+    job: "{{ gitea_data_path }}/scripts/gitea_dump.sh"
