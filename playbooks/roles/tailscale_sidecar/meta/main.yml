@@ -1,0 +1,73 @@
+---
+galaxy_info:
+  author: Brian R. Jackson
+  description: >
+    A reusable role to deploy a Tailscale sidecar container that shares its
+    network namespace with a companion application container.
+  license: MIT
+  min_ansible_version: "2.12"
+  platforms:
+    - name: GenericLinux
+      versions:
+        - all
+
+argument_specs:
+  main:
+    short_description: Deploy a Tailscale sidecar container.
+    options:
+      tailscale_enabled:
+        type: "bool"
+        required: false
+        default: true
+        description: "Set to false to skip all Tailscale tasks (e.g. for testing)."
+      tailscale_image:
+        type: "str"
+        required: false
+        default: "tailscale/tailscale:latest"
+      tailscale_container_name:
+        type: "str"
+        required: true
+        description: "Name for the sidecar container (e.g. tailscale-gitea)."
+      tailscale_hostname:
+        type: "str"
+        required: true
+        description: "Machine hostname on the tailnet (e.g. gitea)."
+      tailscale_authkey:
+        type: "str"
+        required: true
+        no_log: true
+        description: "Tailscale auth key (TS_AUTHKEY)."
+      tailscale_state_dir:
+        type: "str"
+        required: true
+        description: "Host path for persistent Tailscale state."
+      tailscale_network_name:
+        type: "str"
+        required: true
+        description: "Docker bridge network to attach the sidecar to."
+      tailscale_serve_enabled:
+        type: "bool"
+        required: false
+        default: false
+        description: "Deploy a TS_SERVE config for HTTPS termination."
+      tailscale_serve_config_src:
+        type: "str"
+        required: false
+        description: "Jinja2 template filename for the serve config."
+      tailscale_serve_config_dest:
+        type: "str"
+        required: false
+        description: "Host path where the rendered serve config is written."
+      tailscale_host_ports:
+        type: "list"
+        required: false
+        default: []
+        description: "Host port mappings (e.g. ['8443:3000', '22222:22'])."
+      tailscale_serve_domain:
+        type: "str"
+        required: false
+        description: "Domain for TS_SERVE Web handler (e.g. gitea.your-tailnet.ts.net). Required when tailscale_serve_enabled is true."
+      tailscale_serve_proxy_port:
+        type: "str"
+        required: false
+        description: "Local port to proxy traffic to (e.g. 3000). Required when tailscale_serve_enabled is true."

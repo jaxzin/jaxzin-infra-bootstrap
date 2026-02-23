@@ -2,12 +2,15 @@
 WORK_PATH = /var/lib/gitea
 
 [server]
-PROTOCOL = https
+PROTOCOL = {{ gitea_protocol | default('https') }}
 DOMAIN = {{ gitea_domain }}
-ROOT_URL = https://{{ gitea_domain }}:{{ gitea_port }}/
-CERT_FILE = /etc/letsencrypt/live/{{ gitea_domain }}/fullchain.pem
-KEY_FILE = /etc/letsencrypt/live/{{ gitea_domain }}/privkey.pem
+ROOT_URL = {{ gitea_root_url | default('https://' + gitea_domain + ':' + gitea_port + '/') }}
+{% if gitea_protocol | default('https') == 'https' %}
+CERT_FILE = /etc/letsencrypt/live/{{ certbot_domain | default(gitea_domain) }}/fullchain.pem
+KEY_FILE = /etc/letsencrypt/live/{{ certbot_domain | default(gitea_domain) }}/privkey.pem
+{% endif %}
 SSH_PORT = {{ gitea_ssh_port }}
+SSH_DOMAIN = {{ gitea_ssh_domain | default(gitea_domain) }}
 
 [database]
 DB_TYPE = mysql
