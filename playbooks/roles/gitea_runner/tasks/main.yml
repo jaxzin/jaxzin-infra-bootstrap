@@ -69,8 +69,6 @@
     state: started
     restart_policy: always
     network_mode: "container:{{ tailscale_runner_container_name }}"
-    dns_opts:
-      - "ndots:0"
     privileged: true
     env:
       CONFIG_FILE: "/data/conf/config.yml"

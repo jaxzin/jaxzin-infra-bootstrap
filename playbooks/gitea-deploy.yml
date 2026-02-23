@@ -30,7 +30,7 @@
         - gitea_admin_email
         - gitea_db_password
         - tailscale_tailnet
-        - lan_domain  # derived from NAS_HOST
+        - lan_domain
 
     - name: Validate Tailscale auth key
       assert:
@@ -65,12 +65,11 @@
         tailscale_state_dir: "{{ tailscale_gitea_state_dir }}"
         tailscale_serve_enabled: true
         tailscale_serve_config_src: "ts-serve-gitea.json.j2"
-        tailscale_serve_config_dest: "{{ tailscale_gitea_serve_config_dest }}"
+        tailscale_serve_config_dir: "{{ tailscale_gitea_serve_config_dir }}"
         tailscale_serve_domain: "{{ gitea_domain }}"
         tailscale_serve_proxy_port: "3000"
         tailscale_host_ports:
-          - "{{ gitea_lan_port }}:3000"
-          - "{{ gitea_ssh_host_port }}:22"
+          - "127.0.0.1:{{ gitea_port }}:3000"
 
     - name: Include gitea_server role
       include_role:

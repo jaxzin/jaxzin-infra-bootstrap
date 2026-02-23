@@ -12,6 +12,7 @@ jobs:
     runs-on: [self-hosted, linux]
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
+      options: --dns ${{ vars.LAN_DNS }}
     env:
       CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
