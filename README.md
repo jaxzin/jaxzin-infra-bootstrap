@@ -221,6 +221,7 @@ In GitHub (Settings → Secrets and variables → Actions → Variables):
 | `NAS_HOST`            | FQDN/IP of NAS                                     |
 | `NAS_SSH_USER`        | NAS SSH user                                       |
 | `TS_TAILNET`          | Your Tailscale tailnet domain (e.g. `your-tailnet.ts.net`) |
+| `LAN_DNS`             | LAN DNS server IP (for container DNS resolution)           |
 
 ### 3. Self-hosting a GitHub Runner
 
