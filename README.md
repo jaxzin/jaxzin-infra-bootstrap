@@ -64,19 +64,19 @@ Makefile                        # Makefile for common tasks
 ```mermaid
 flowchart TB
     subgraph Tailnet["Tailscale Tailnet"]
-        TG_TS["tailscale-gitea<br/>(TS_SERVE: HTTPS → :3000)"]
+        TG_TS["tailscale-gitea<br/>(TS_SERVE: HTTPS → HTTP :3000)"]
         TR_TS["tailscale-runner<br/>(tailnet access only)"]
     end
     subgraph DockerNet["gitea-net (Docker Bridge)"]
-        TG_TS --- |"network_mode: container"| Gitea["gitea<br/>(HTTPS :3000, SSH :22)"]
+        TG_TS --- |"network_mode: container"| Gitea["gitea<br/>(HTTP :3000, SSH :22)"]
         DB["gitea-db<br/>(MySQL :3306)"]
         TR_TS --- |"network_mode: container"| Runner["gitea-runner<br/>(Act Runner)"]
     end
     subgraph LAN["LAN Fallback"]
-        LAN_HTTPS["Host :8443 → :3000"]
+        LAN_HTTP["Host :8443 → :3000 (HTTP)"]
         LAN_SSH["Host :22222 → :22"]
     end
-    TG_TS --> LAN_HTTPS
+    TG_TS --> LAN_HTTP
     TG_TS --> LAN_SSH
     Gitea --> |"gitea-db:3306"| DB
     Runner --> |"https://gitea.tailnet"| TG_TS
@@ -144,12 +144,12 @@ Gitea and the Gitea Actions runner are each paired with a [Tailscale](https://ta
 
 Each application container shares its network namespace with a `tailscale/tailscale` sidecar container using Docker's `network_mode: container:` option. The sidecar handles Tailscale connectivity while the application runs its services as if they were local. Both sidecars are placed on the `gitea-net` Docker bridge network, which allows Gitea to reach MySQL (`gitea-db:3306`) while keeping MySQL itself off the tailnet entirely.
 
-[Tailscale Serve](https://tailscale.com/kb/1312/serve) provides HTTPS on the tailnet for Gitea — it proxies `https://gitea.<your-tailnet>:443` to Gitea's HTTPS port inside the shared network namespace. Gitea serves HTTPS using Let's Encrypt certs (managed by certbot), and Tailscale Serve re-terminates with its own MagicDNS certificate for the tailnet hostname.
+[Tailscale Serve](https://tailscale.com/kb/1312/serve) provides HTTPS on the tailnet for Gitea — it terminates TLS with a Tailscale-managed certificate and proxies to Gitea's HTTP port inside the shared network namespace. Gitea itself runs plain HTTP internally; all HTTPS for the tailnet is handled by Tailscale Serve.
 
 ### LAN Fallback
 
 Gitea is also accessible directly on the LAN for cases where Tailscale is unavailable:
-- **HTTPS**: `https://<NAS-IP>:8443` (using Let's Encrypt certs via certbot)
+- **HTTP**: `http://<NAS-IP>:8443` (plain HTTP on the private LAN)
 - **SSH**: `ssh://<NAS-IP>:22222` (for Git over SSH on the LAN)
 
 ### Using This Repo as a Template

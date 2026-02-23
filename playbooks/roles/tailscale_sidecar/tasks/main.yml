@@ -9,10 +9,19 @@
     mode: '0700'
   when: tailscale_enabled | bool
 
+- name: Create Tailscale Serve config directory
+  file:
+    path: "{{ tailscale_serve_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: tailscale_enabled | bool and tailscale_serve_enabled | bool
+
 - name: Deploy Tailscale Serve configuration
   template:
     src: "{{ tailscale_serve_config_src }}"
-    dest: "{{ tailscale_serve_config_dest }}"
+    dest: "{{ tailscale_serve_config_dir }}/serve.json"
     owner: root
     group: root
     mode: '0644'
@@ -41,7 +50,7 @@
       {{
         [tailscale_state_dir + ':/var/lib/tailscale',
          '/dev/net/tun:/dev/net/tun']
-        + ([tailscale_serve_config_dest + ':/etc/tailscale/serve.json:ro']
+        + ([tailscale_serve_config_dir + ':/etc/tailscale:ro']
            if (tailscale_serve_enabled | bool) else [])
       }}
   when: tailscale_enabled | bool

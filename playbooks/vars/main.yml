@@ -17,7 +17,7 @@ tailscale_data_path: "{{ gitea_data_path }}/tailscale"
 tailscale_gitea_container_name: "tailscale-gitea"
 tailscale_gitea_hostname: "gitea"
 tailscale_gitea_state_dir: "{{ tailscale_data_path }}/gitea-state"
-tailscale_gitea_serve_config_dest: "{{ tailscale_data_path }}/gitea-serve.json"
+tailscale_gitea_serve_config_dir: "{{ tailscale_data_path }}/gitea-serve-config"
 # Runner sidecar
 tailscale_runner_container_name: "tailscale-runner"
 tailscale_runner_hostname: "gitea-runner"
@@ -45,7 +45,7 @@ certbot_command_args: [
 # =============================================================================
 # Domain & networking
 gitea_domain: "gitea.{{ tailscale_tailnet }}"
-gitea_protocol: "https"
+gitea_protocol: "http"
 gitea_root_url: "https://gitea.{{ tailscale_tailnet }}/"
 gitea_port: "8443"
 gitea_lan_port: "{{ gitea_port }}"

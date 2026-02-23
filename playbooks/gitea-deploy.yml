@@ -65,7 +65,7 @@
         tailscale_state_dir: "{{ tailscale_gitea_state_dir }}"
         tailscale_serve_enabled: true
         tailscale_serve_config_src: "ts-serve-gitea.json.j2"
-        tailscale_serve_config_dest: "{{ tailscale_gitea_serve_config_dest }}"
+        tailscale_serve_config_dir: "{{ tailscale_gitea_serve_config_dir }}"
         tailscale_serve_domain: "{{ gitea_domain }}"
         tailscale_serve_proxy_port: "3000"
         tailscale_host_ports:
