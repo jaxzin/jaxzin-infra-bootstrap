@@ -45,7 +45,7 @@ certbot_command_args: [
 # =============================================================================
 # Domain & networking
 gitea_domain: "gitea.{{ tailscale_tailnet }}"
-gitea_protocol: "http"
+gitea_protocol: "https"
 gitea_root_url: "https://gitea.{{ tailscale_tailnet }}/"
 gitea_port: "8443"
 gitea_lan_port: "{{ gitea_port }}"

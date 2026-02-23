@@ -114,6 +114,7 @@
       - "{{ gitea_data_path }}/gitea:/var/lib/gitea"
       - "{{ gitea_app_ini_path_host }}:{{ gitea_app_ini_path_container }}"
       - "{{ gitea_data_path }}/conf/secrets:/etc/gitea/secrets:ro"
+      - "{{ certbot_data_path }}/certs:/etc/letsencrypt:ro"
   when: tailscale_enabled | default(false) | bool
   tags: gitea
   notify: Restart Gitea
