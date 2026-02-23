@@ -31,6 +31,11 @@ docker-build:
 	@echo "Building custom Docker runner image..."
 	@docker build -t ghcr.io/jaxzin/jaxzin-infra-runner:latest .
 
+.PHONY: test
+test: ## Run regression test suite (no Docker/NAS required)
+	@echo "Running regression tests..."
+	@ansible-playbook tests/test-regression.yml
+
 .PHONY: help
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
