@@ -48,14 +48,12 @@ gitea_domain: "gitea.{{ tailscale_tailnet }}"
 gitea_protocol: "http"
 gitea_root_url: "https://gitea.{{ tailscale_tailnet }}/"
 gitea_port: "8443"
-gitea_lan_port: "{{ gitea_port }}"
 gitea_ssh_port: "22"
-gitea_ssh_host_port: "22222"
 gitea_ssh_domain: "gitea.{{ tailscale_tailnet }}"
 gitea_network_name: "gitea-net"
 
-# Internal API URL for Ansible provisioning (via sidecar host port mapping)
-gitea_api_base_url: "http://127.0.0.1:{{ gitea_lan_port }}"
+# Localhost-only API URL for Ansible provisioning (bound to 127.0.0.1 in sidecar)
+gitea_api_base_url: "http://127.0.0.1:{{ gitea_port }}"
 
 # Runner instance URL (via tailnet)
 gitea_instance_url: "https://gitea.{{ tailscale_tailnet }}"

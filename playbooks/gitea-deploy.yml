@@ -69,8 +69,7 @@
         tailscale_serve_domain: "{{ gitea_domain }}"
         tailscale_serve_proxy_port: "3000"
         tailscale_host_ports:
-          - "{{ gitea_lan_port }}:3000"
-          - "{{ gitea_ssh_host_port }}:22"
+          - "127.0.0.1:{{ gitea_port }}:3000"
 
     - name: Include gitea_server role
       include_role:

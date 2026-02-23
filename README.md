@@ -72,12 +72,6 @@ flowchart TB
         DB["gitea-db<br/>(MySQL :3306)"]
         TR_TS --- |"network_mode: container"| Runner["gitea-runner<br/>(Act Runner)"]
     end
-    subgraph LAN["LAN Fallback"]
-        LAN_HTTP["Host :8443 → :3000 (HTTP)"]
-        LAN_SSH["Host :22222 → :22"]
-    end
-    TG_TS --> LAN_HTTP
-    TG_TS --> LAN_SSH
     Gitea --> |"gitea-db:3306"| DB
     Runner --> |"https://gitea.tailnet"| TG_TS
 ```
@@ -146,12 +140,6 @@ Each application container shares its network namespace with a `tailscale/tailsc
 
 [Tailscale Serve](https://tailscale.com/kb/1312/serve) provides HTTPS on the tailnet for Gitea — it terminates TLS with a Tailscale-managed certificate and proxies to Gitea's HTTP port inside the shared network namespace. Gitea itself runs plain HTTP internally; all HTTPS for the tailnet is handled by Tailscale Serve.
 
-### LAN Fallback
-
-Gitea is also accessible directly on the LAN for cases where Tailscale is unavailable:
-- **HTTP**: `http://<NAS-IP>:8443` (plain HTTP on the private LAN)
-- **SSH**: `ssh://<NAS-IP>:22222` (for Git over SSH on the LAN)
-
 ### Using This Repo as a Template
 
 To set up Tailscale for your own fork:
@@ -161,8 +149,6 @@ To set up Tailscale for your own fork:
 3. Set the `TS_AUTHKEY` **secret** and `TS_TAILNET` **variable** in your GitHub repo settings (see the table below).
 4. Run the bootstrap workflow — Gitea will be available at `https://gitea.<your-tailnet>` from any tailnet device.
 5. The runner will appear as `gitea-runner` on your tailnet.
-
-The certbot certificate domain is derived from the existing `NAS_HOST` variable, so no additional variable is needed for LAN access.
 
 ### Disabling Tailscale
 
