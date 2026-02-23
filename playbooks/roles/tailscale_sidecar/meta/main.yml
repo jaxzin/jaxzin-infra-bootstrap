@@ -58,6 +58,11 @@ argument_specs:
         type: "str"
         required: false
         description: "Host directory for the rendered serve config (mounted as a directory per Tailscale docs)."
+      tailscale_accept_dns:
+        type: "bool"
+        required: false
+        default: true
+        description: "Accept DNS configuration from the tailnet (MagicDNS). Required for resolving tailnet hostnames."
       tailscale_host_ports:
         type: "list"
         required: false
