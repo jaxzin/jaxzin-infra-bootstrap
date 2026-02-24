@@ -128,38 +128,70 @@
     # ================================================================
     # Check 4: ts-serve-gitea.json.j2 renders correctly (Gap 5)
     # ================================================================
-    - name: "CHECK 4: Render ts-serve-gitea.json.j2"
+    - name: "CHECK 4a: Render ts-serve-gitea.json.j2 (with SSH)"
       template:
         src: "{{ roles_dir }}/tailscale_sidecar/templates/ts-serve-gitea.json.j2"
         dest: "/tmp/test-ts-serve-rendered.json"
       vars:
         tailscale_serve_domain: "{{ test_serve_domain }}"
         tailscale_serve_proxy_port: "{{ test_serve_proxy_port }}"
+        tailscale_serve_ssh_port: "{{ test_gitea_ssh_port }}"
 
-    - name: "CHECK 4: Read rendered ts-serve config"
+    - name: "CHECK 4a: Read rendered ts-serve config"
       slurp:
         src: /tmp/test-ts-serve-rendered.json
       register: rendered_serve
 
-    - name: "CHECK 4: Decode ts-serve config"
+    - name: "CHECK 4a: Decode ts-serve config"
       set_fact:
         serve_content: "{{ rendered_serve.content | b64decode }}"
 
-    - name: "CHECK 4: Assert ts-serve config is valid JSON"
+    - name: "CHECK 4a: Assert ts-serve config is valid JSON"
       set_fact:
         serve_json: "{{ serve_content | from_json }}"
 
-    - name: "CHECK 4: Assert ts-serve proxies to correct port"
+    - name: "CHECK 4a: Assert ts-serve proxies to correct port"
       assert:
         that:
           - "'http://127.0.0.1:3000' in serve_content"
         fail_msg: "ts-serve config should proxy to http://127.0.0.1:3000"
 
-    - name: "CHECK 4: Assert ts-serve uses tailnet domain"
+    - name: "CHECK 4a: Assert ts-serve uses tailnet domain"
       assert:
         that:
           - "'gitea.test-tailnet.ts.net' in serve_content"
         fail_msg: "ts-serve config should reference the tailnet domain"
+
+    - name: "CHECK 4a: Assert ts-serve forwards SSH port"
+      assert:
+        that:
+          - "serve_json.TCP['22'] is defined"
+          - "serve_json.TCP['22'].HTTPS == false"
+          - "serve_json.TCP['22'].TCPForward == '127.0.0.1:22'"
+        fail_msg: "ts-serve config should forward TCP port 22 for SSH"
+
+    - name: "CHECK 4b: Render ts-serve-gitea.json.j2 (without SSH)"
+      template:
+        src: "{{ roles_dir }}/tailscale_sidecar/templates/ts-serve-gitea.json.j2"
+        dest: "/tmp/test-ts-serve-no-ssh.json"
+      vars:
+        tailscale_serve_domain: "{{ test_serve_domain }}"
+        tailscale_serve_proxy_port: "{{ test_serve_proxy_port }}"
+
+    - name: "CHECK 4b: Read rendered ts-serve config (no SSH)"
+      slurp:
+        src: /tmp/test-ts-serve-no-ssh.json
+      register: rendered_serve_no_ssh
+
+    - name: "CHECK 4b: Assert ts-serve without SSH is valid JSON"
+      set_fact:
+        serve_json_no_ssh: "{{ rendered_serve_no_ssh.content | b64decode | from_json }}"
+
+    - name: "CHECK 4b: Assert ts-serve without SSH has no SSH entry"
+      assert:
+        that:
+          - "serve_json_no_ssh.TCP['22'] is not defined"
+        fail_msg: "ts-serve config should NOT have SSH when tailscale_serve_ssh_port is undefined"
 
     # ================================================================
     # Cleanup
@@ -171,3 +203,4 @@
       loop:
         - /tmp/test-app-ini-rendered
         - /tmp/test-ts-serve-rendered.json
+        - /tmp/test-ts-serve-no-ssh.json

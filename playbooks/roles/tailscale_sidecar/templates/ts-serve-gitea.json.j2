@@ -2,7 +2,12 @@
   "TCP": {
     "443": {
       "HTTPS": true
+    }{% if tailscale_serve_ssh_port is defined %},
+    "{{ tailscale_serve_ssh_port }}": {
+      "HTTPS": false,
+      "TCPForward": "127.0.0.1:{{ tailscale_serve_ssh_port }}"
     }
+{%- endif %}
   },
   "Web": {
     "{{ tailscale_serve_domain }}:443": {
