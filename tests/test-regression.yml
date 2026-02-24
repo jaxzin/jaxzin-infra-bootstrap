@@ -19,6 +19,7 @@
     test_gitea_protocol: "http"
     test_gitea_port: "8443"
     test_gitea_ssh_port: "22"
+    test_gitea_ssh_listen_port: "2222"
     test_gitea_root_url: "https://gitea.test-tailnet.ts.net/"
     test_gitea_ssh_domain: "gitea.test-tailnet.ts.net"
     test_serve_domain: "gitea.test-tailnet.ts.net"
@@ -80,6 +81,7 @@
         gitea_root_url: "{{ test_gitea_root_url }}"
         gitea_port: "{{ test_gitea_port }}"
         gitea_ssh_port: "{{ test_gitea_ssh_port }}"
+        gitea_ssh_listen_port: "{{ test_gitea_ssh_listen_port }}"
         gitea_ssh_domain: "{{ test_gitea_ssh_domain }}"
         gitea_db_name: "test_db"
         gitea_db_user: "test_user"
@@ -119,6 +121,18 @@
           - "'KEY_FILE' not in ini_content"
         fail_msg: "app.ini should not have KEY_FILE when PROTOCOL = http"
 
+    - name: "CHECK 3: Assert app.ini enables built-in SSH server"
+      assert:
+        that:
+          - "'START_SSH_SERVER = true' in ini_content"
+        fail_msg: "app.ini should have START_SSH_SERVER = true for rootless image"
+
+    - name: "CHECK 3: Assert app.ini SSH_LISTEN_PORT is set"
+      assert:
+        that:
+          - "'SSH_LISTEN_PORT = 2222' in ini_content"
+        fail_msg: "app.ini should have SSH_LISTEN_PORT = 2222 for rootless image"
+
     - name: "CHECK 3: Assert app.ini SSH_DOMAIN uses tailnet"
       assert:
         that:
@@ -136,6 +150,7 @@
         tailscale_serve_domain: "{{ test_serve_domain }}"
         tailscale_serve_proxy_port: "{{ test_serve_proxy_port }}"
         tailscale_serve_ssh_port: "{{ test_gitea_ssh_port }}"
+        tailscale_serve_ssh_target_port: "{{ test_gitea_ssh_listen_port }}"
 
     - name: "CHECK 4a: Read rendered ts-serve config"
       slurp:
@@ -167,7 +182,7 @@
         that:
           - "serve_json.TCP['22'] is defined"
           - "serve_json.TCP['22'].HTTPS == false"
-          - "serve_json.TCP['22'].TCPForward == '127.0.0.1:22'"
+          - "serve_json.TCP['22'].TCPForward == '127.0.0.1:2222'"
         fail_msg: "ts-serve config should forward TCP port 22 for SSH"
 
     - name: "CHECK 4b: Render ts-serve-gitea.json.j2 (without SSH)"

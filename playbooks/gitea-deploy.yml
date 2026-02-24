@@ -69,6 +69,7 @@
         tailscale_serve_domain: "{{ gitea_domain }}"
         tailscale_serve_proxy_port: "3000"
         tailscale_serve_ssh_port: "{{ gitea_ssh_port }}"
+        tailscale_serve_ssh_target_port: "{{ gitea_ssh_listen_port }}"
         tailscale_host_ports:
           - "127.0.0.1:{{ gitea_port }}:3000"
 

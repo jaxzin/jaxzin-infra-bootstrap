@@ -9,7 +9,9 @@ ROOT_URL = {{ gitea_root_url | default('https://' + gitea_domain + ':' + gitea_p
 CERT_FILE = /etc/letsencrypt/live/{{ certbot_domain | default(gitea_domain) }}/fullchain.pem
 KEY_FILE = /etc/letsencrypt/live/{{ certbot_domain | default(gitea_domain) }}/privkey.pem
 {% endif %}
+START_SSH_SERVER = true
 SSH_PORT = {{ gitea_ssh_port }}
+SSH_LISTEN_PORT = {{ gitea_ssh_listen_port | default('2222') }}
 SSH_DOMAIN = {{ gitea_ssh_domain | default(gitea_domain) }}
 
 [database]
