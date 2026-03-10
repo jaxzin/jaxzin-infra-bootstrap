@@ -86,6 +86,8 @@
     image: "{{ gitea_runner_image }}"
     state: started
     restart_policy: always
+    memory: "{{ gitea_runner_memory_limit }}"
+    memory_swap: "{{ gitea_runner_memory_swap }}"
     networks:
       - name: "{{ gitea_network_name }}"
     dns_opts:

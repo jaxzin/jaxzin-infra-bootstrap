@@ -1,3 +1,9 @@
 ---
+
+# Container resource limits
+gitea_runner_memory_limit: "512m"
+gitea_runner_memory_swap: "1024m"
+
+
 gitea_runner_config_file_parent: "{{ gitea_runner_data_path }}/conf"
 gitea_runner_config_file: "{{ gitea_runner_config_file_parent }}/config.yml"

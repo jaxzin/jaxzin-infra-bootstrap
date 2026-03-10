@@ -38,6 +38,8 @@
     image: "{{ gitea_db_image }}"
     state: started
     restart_policy: always
+    memory: "384m"
+    memory_swap: "768m"
     networks:
       - name: "{{ gitea_network_name }}"
     env:
@@ -124,6 +126,8 @@
     image: "{{ gitea_image }}"
     state: started
     restart_policy: always
+    memory: "256m"
+    memory_swap: "512m"
     networks:
       - name: "{{ gitea_network_name }}"
     env:
