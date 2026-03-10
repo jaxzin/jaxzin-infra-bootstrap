@@ -1,0 +1,5 @@
+---
+
+# Container resource limits
+gitea_runner_memory_limit: "512m"
+gitea_runner_memory_swap: "1024m"
