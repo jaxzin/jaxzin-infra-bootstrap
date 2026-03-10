@@ -15,7 +15,7 @@
   vars:
     gitea_container_name: gitea
     gitea_db_container_name: gitea-db
-    gitea_base_path: "/volume1/docker/gitea"
+    gitea_base_path: "{{ gitea_data_path }}"
     gitea_restore_tmp_path: "{{ gitea_base_path }}/tmp/restore"
     b2_bucket_name: "{{ lookup('ansible.builtin.env','B2_BUCKET_NAME') }}"
     b2_application_key_id: "{{ lookup('ansible.builtin.env','B2_APPLICATION_KEY_ID') }}"

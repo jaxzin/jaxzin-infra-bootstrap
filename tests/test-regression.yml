@@ -1,0 +1,173 @@
+---
+# tests/test-regression.yml
+#
+# Regression test suite for Tailscale sidecar integration.
+# Run with: ansible-playbook tests/test-regression.yml
+# Requires: No Docker, no NAS, no secrets.
+#
+- name: Regression Tests
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    project_root: "{{ playbook_dir }}/.."
+    roles_dir: "{{ project_root }}/playbooks/roles"
+    templates_dir: "{{ project_root }}/playbooks/templates"
+    # Test-only variables for template rendering (no real domains)
+    test_tailnet: "test-tailnet.ts.net"
+    test_gitea_domain: "gitea.test-tailnet.ts.net"
+    test_gitea_protocol: "http"
+    test_gitea_port: "8443"
+    test_gitea_ssh_port: "22"
+    test_gitea_root_url: "https://gitea.test-tailnet.ts.net/"
+    test_gitea_ssh_domain: "gitea.test-tailnet.ts.net"
+    test_serve_domain: "gitea.test-tailnet.ts.net"
+    test_serve_proxy_port: "3000"
+
+  tasks:
+    # ================================================================
+    # Check 1: Docker task structural validation (Gaps 1, 2, 4)
+    # ================================================================
+    - name: "CHECK 1: Run Docker task structural validator"
+      command: python3 {{ project_root }}/tests/check_docker_tasks.py
+      args:
+        chdir: "{{ project_root }}"
+      changed_when: false
+
+    # ================================================================
+    # Check 2: No hardcoded /volume1/ paths in roles (Gap 3)
+    # ================================================================
+    - name: "CHECK 2: Scan role tasks for hardcoded /volume1/ paths"
+      shell: >
+        grep -rn '/volume1/' {{ roles_dir }}/*/tasks/ {{ roles_dir }}/*/templates/
+        || true
+      register: hardcoded_paths_roles
+      changed_when: false
+
+    - name: "CHECK 2: Assert no hardcoded paths in roles"
+      assert:
+        that:
+          - hardcoded_paths_roles.stdout == ""
+        fail_msg: >
+          Found hardcoded /volume1/ paths in role files (use {{ '{{' }} gitea_data_path {{ '}}' }} instead):
+          {{ hardcoded_paths_roles.stdout }}
+
+    - name: "CHECK 2: Scan playbooks for hardcoded /volume1/ paths (excluding vars)"
+      shell: >
+        grep -rn '/volume1/' {{ project_root }}/playbooks/*.yml
+        || true
+      register: hardcoded_paths_playbooks
+      changed_when: false
+
+    - name: "CHECK 2: Assert no hardcoded paths in playbooks (excluding vars/main.yml)"
+      assert:
+        that:
+          - hardcoded_paths_playbooks.stdout == ""
+        fail_msg: >
+          Found hardcoded /volume1/ paths in playbook files:
+          {{ hardcoded_paths_playbooks.stdout }}
+
+    # ================================================================
+    # Check 3: app.ini.j2 renders correctly with Tailscale vars (Gap 5)
+    # ================================================================
+    - name: "CHECK 3: Render app.ini.j2 with Tailscale test variables"
+      template:
+        src: "{{ templates_dir }}/app.ini.j2"
+        dest: "/tmp/test-app-ini-rendered"
+      vars:
+        gitea_protocol: "{{ test_gitea_protocol }}"
+        gitea_domain: "{{ test_gitea_domain }}"
+        gitea_root_url: "{{ test_gitea_root_url }}"
+        gitea_port: "{{ test_gitea_port }}"
+        gitea_ssh_port: "{{ test_gitea_ssh_port }}"
+        gitea_ssh_domain: "{{ test_gitea_ssh_domain }}"
+        gitea_db_name: "test_db"
+        gitea_db_user: "test_user"
+        gitea_db_password: "test_pass"
+        gitea_jwt_secret: "test_jwt_secret_value"
+
+    - name: "CHECK 3: Read rendered app.ini"
+      slurp:
+        src: /tmp/test-app-ini-rendered
+      register: rendered_ini
+
+    - name: "CHECK 3: Decode rendered app.ini"
+      set_fact:
+        ini_content: "{{ rendered_ini.content | b64decode }}"
+
+    - name: "CHECK 3: Assert app.ini PROTOCOL is http"
+      assert:
+        that:
+          - "'PROTOCOL = http' in ini_content"
+        fail_msg: "app.ini should have PROTOCOL = http when Tailscale handles TLS, got: {{ ini_content }}"
+
+    - name: "CHECK 3: Assert app.ini ROOT_URL uses tailnet domain"
+      assert:
+        that:
+          - "'https://gitea.test-tailnet.ts.net/' in ini_content"
+        fail_msg: "app.ini ROOT_URL should use the tailnet domain"
+
+    - name: "CHECK 3: Assert app.ini has no CERT_FILE in http mode"
+      assert:
+        that:
+          - "'CERT_FILE' not in ini_content"
+        fail_msg: "app.ini should not have CERT_FILE when PROTOCOL = http"
+
+    - name: "CHECK 3: Assert app.ini has no KEY_FILE in http mode"
+      assert:
+        that:
+          - "'KEY_FILE' not in ini_content"
+        fail_msg: "app.ini should not have KEY_FILE when PROTOCOL = http"
+
+    - name: "CHECK 3: Assert app.ini SSH_DOMAIN uses tailnet"
+      assert:
+        that:
+          - "'SSH_DOMAIN = gitea.test-tailnet.ts.net' in ini_content"
+        fail_msg: "app.ini SSH_DOMAIN should use the tailnet domain"
+
+    # ================================================================
+    # Check 4: ts-serve-gitea.json.j2 renders correctly (Gap 5)
+    # ================================================================
+    - name: "CHECK 4: Render ts-serve-gitea.json.j2"
+      template:
+        src: "{{ roles_dir }}/tailscale_sidecar/templates/ts-serve-gitea.json.j2"
+        dest: "/tmp/test-ts-serve-rendered.json"
+      vars:
+        tailscale_serve_domain: "{{ test_serve_domain }}"
+        tailscale_serve_proxy_port: "{{ test_serve_proxy_port }}"
+
+    - name: "CHECK 4: Read rendered ts-serve config"
+      slurp:
+        src: /tmp/test-ts-serve-rendered.json
+      register: rendered_serve
+
+    - name: "CHECK 4: Decode ts-serve config"
+      set_fact:
+        serve_content: "{{ rendered_serve.content | b64decode }}"
+
+    - name: "CHECK 4: Assert ts-serve config is valid JSON"
+      set_fact:
+        serve_json: "{{ serve_content | from_json }}"
+
+    - name: "CHECK 4: Assert ts-serve proxies to correct port"
+      assert:
+        that:
+          - "'http://127.0.0.1:3000' in serve_content"
+        fail_msg: "ts-serve config should proxy to http://127.0.0.1:3000"
+
+    - name: "CHECK 4: Assert ts-serve uses tailnet domain"
+      assert:
+        that:
+          - "'gitea.test-tailnet.ts.net' in serve_content"
+        fail_msg: "ts-serve config should reference the tailnet domain"
+
+    # ================================================================
+    # Cleanup
+    # ================================================================
+    - name: Clean up rendered test files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/test-app-ini-rendered
+        - /tmp/test-ts-serve-rendered.json

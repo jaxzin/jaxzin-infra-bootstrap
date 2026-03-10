@@ -12,6 +12,7 @@ jobs:
     runs-on: [self-hosted, linux]
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
+      options: --dns ${{ vars.LAN_DNS }}
     env:
       CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
@@ -28,6 +29,8 @@ jobs:
       NAS_SSH_USER: ${{ vars.NAS_SSH_USER }}
       NAS_SSH_PASSWORD: ${{ secrets.NAS_SSH_PASSWORD }}
       SSH_KEY: ${{ secrets.SSH_KEY }}
+      TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+      TS_TAILNET: ${{ vars.TS_TAILNET }}
     steps:
       - name: Checkout IaC
         uses: actions/checkout@v4
@@ -46,7 +49,6 @@ jobs:
 
       - name: Deploy infrastructure
         id: deploy
-        continue-on-error: true
         uses: dawidd6/action-ansible-playbook@v4
         with:
           playbook: gitea-deploy.yml

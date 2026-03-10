@@ -29,6 +29,16 @@
         - gitea_admin_password
         - gitea_admin_email
         - gitea_db_password
+        - tailscale_tailnet
+        - lan_domain
+
+    - name: Validate Tailscale auth key
+      assert:
+        that:
+          - tailscale_authkey is defined
+          - tailscale_authkey | string != ""
+        fail_msg: "TS_AUTHKEY is required when tailscale_enabled is true."
+      when: tailscale_enabled | default(false) | bool
 
     - name: Install Python3
       include_role:
@@ -46,6 +56,21 @@
       include_role:
         name: certbot
 
+    - name: Deploy Tailscale sidecar for Gitea
+      include_role:
+        name: tailscale_sidecar
+      vars:
+        tailscale_container_name: "{{ tailscale_gitea_container_name }}"
+        tailscale_hostname: "{{ tailscale_gitea_hostname }}"
+        tailscale_state_dir: "{{ tailscale_gitea_state_dir }}"
+        tailscale_serve_enabled: true
+        tailscale_serve_config_src: "ts-serve-gitea.json.j2"
+        tailscale_serve_config_dir: "{{ tailscale_gitea_serve_config_dir }}"
+        tailscale_serve_domain: "{{ gitea_domain }}"
+        tailscale_serve_proxy_port: "3000"
+        tailscale_host_ports:
+          - "127.0.0.1:{{ gitea_port }}:3000"
+
     - name: Include gitea_server role
       include_role:
         name: gitea_server
@@ -53,6 +78,17 @@
     - name: Detect if running in Gitea
       set_fact:
         in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true' }}"
+
+    - name: Deploy Tailscale sidecar for Runner
+      include_role:
+        name: tailscale_sidecar
+      vars:
+        tailscale_container_name: "{{ tailscale_runner_container_name }}"
+        tailscale_hostname: "{{ tailscale_runner_hostname }}"
+        tailscale_state_dir: "{{ tailscale_runner_state_dir }}"
+        tailscale_serve_enabled: false
+        tailscale_host_ports: []
+      when: not in_gitea
 
     # only install the Gitea runner if bootstrapping the server from GitHub
     - name: Include gitea_runner role
