@@ -49,7 +49,7 @@ jobs:
 
       - name: Deploy infrastructure
         id: deploy
-        uses: dawidd6/action-ansible-playbook@v4
+        uses: dawidd6/action-ansible-playbook@v9
         with:
           playbook: gitea-deploy.yml
           directory: ./playbooks
