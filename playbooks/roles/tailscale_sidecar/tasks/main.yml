@@ -43,8 +43,8 @@
       TS_HOSTNAME: "{{ tailscale_hostname }}"
       TS_AUTHKEY: "{{ tailscale_authkey }}"
       TS_STATE_DIR: "/var/lib/tailscale"
-      TS_USERSPACE: "{{ tailscale_userspace_networking | default('false') }}"
-      TS_ACCEPT_DNS: "{{ tailscale_accept_dns | default('true') }}"
+      TS_USERSPACE: "{{ tailscale_userspace_networking | default(false) | string | lower }}"
+      TS_ACCEPT_DNS: "{{ tailscale_accept_dns | default(true) | string | lower }}"
       TS_SERVE_CONFIG: "{{ '/etc/tailscale/serve.json' if (tailscale_serve_enabled | bool) else omit }}"
       TS_EXTRA_ARGS: "{{ tailscale_extra_args | default(omit, true) }}"
     volumes: >-
