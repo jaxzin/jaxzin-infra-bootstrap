@@ -2,7 +2,10 @@
   "TCP": {
     "443": {
       "HTTPS": true
-    }
+    }{% if tailscale_serve_ssh_enabled | default(false) | bool %},
+    "22": {
+      "TCPForward": "{{ tailscale_serve_ssh_forward_host | default('127.0.0.1') }}:{{ tailscale_serve_ssh_forward_port | default('22') }}"
+    }{% endif %}
   },
   "Web": {
     "{{ tailscale_serve_domain }}:443": {
