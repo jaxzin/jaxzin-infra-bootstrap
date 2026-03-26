@@ -36,6 +36,7 @@
     networks:
       - name: "{{ tailscale_network_name }}"
     ports: "{{ tailscale_host_ports | default([], true) }}"
+    dns_servers: "{{ ['100.100.100.100'] if not (tailscale_accept_dns | default(true) | bool) else omit }}"
     capabilities:
       - NET_ADMIN
       - SYS_MODULE
