@@ -49,6 +49,7 @@ gitea_protocol: "http"
 gitea_root_url: "https://gitea.{{ tailscale_tailnet }}/"
 gitea_port: "8443"
 gitea_ssh_port: "22"
+gitea_ssh_listen_port: "2222"
 gitea_ssh_domain: "gitea.{{ tailscale_tailnet }}"
 gitea_network_name: "gitea-net"
 

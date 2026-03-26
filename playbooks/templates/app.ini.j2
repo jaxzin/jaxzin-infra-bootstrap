@@ -11,6 +11,10 @@ KEY_FILE = /etc/letsencrypt/live/{{ certbot_domain | default(gitea_domain) }}/pr
 {% endif %}
 SSH_PORT = {{ gitea_ssh_port }}
 SSH_DOMAIN = {{ gitea_ssh_domain | default(gitea_domain) }}
+{% if tailscale_enabled | default(false) | bool %}
+START_SSH_SERVER = true
+SSH_LISTEN_PORT = {{ gitea_ssh_listen_port }}
+{% endif %}
 
 [database]
 DB_TYPE = mysql
