@@ -62,6 +62,19 @@
 
 # --- Runner container deployment (conditional on Tailscale) ---
 
+# Healthcheck used by both deploy variants below. Detects the s6 init wedge
+# observed 2026-05-02 after a NAS dirty restart: dockerd inside the runner
+# came up, but s6 didn't fire its docker-ready signal, so act_runner stayed
+# blocked on `s6-svwait -U /etc/s6/docker` and never started polling. Docker
+# saw the container as "Up" the whole time. The healthcheck below greps
+# /proc for an act_runner process; if missing, Docker marks unhealthy and
+# `restart_policy: always` recreates the container (which re-runs s6 init,
+# usually clean the second time).
+#
+# We can't `pgrep act_runner` because the dind image doesn't ship pgrep —
+# fall back to `grep -q act_runner /proc/*/comm`. The `[a]` trick avoids
+# matching the grep itself.
+
 - name: Deploy Gitea runner container (with Tailscale sidecar)
   community.docker.docker_container:
     name: gitea-runner
@@ -78,6 +91,12 @@
       DOCKER_INSECURE_NO_IPTABLES_RAW: "1" # needed for Docker-in-Docker on the Synology DSM which does not include iptables_raw kernel module
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q act_runner /proc/[0-9]*/comm 2>/dev/null || exit 1"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 2m
   when: tailscale_enabled | default(false) | bool
 
 - name: Deploy Gitea runner container (standalone)
@@ -101,4 +120,10 @@
       DOCKER_INSECURE_NO_IPTABLES_RAW: "1" # needed for Docker-in-Docker on the Synology DSM which does not include iptables_raw kernel module
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q act_runner /proc/[0-9]*/comm 2>/dev/null || exit 1"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 2m
   when: not (tailscale_enabled | default(false) | bool)
