@@ -43,7 +43,7 @@ These steps cannot be code (they bootstrap the credentials code uses).
    - `B2_REGION` — B2 region identifier (e.g., `us-west-002`); kept as a Secret so the operator can change region without editing workflow files
    - `TOFU_STATE_BUCKET` — bucket name (set to the same value as `B2_BUCKET_NAME` initially)
    - `TOFU_STATE_KEY` — `tofu-state/jaxzin-infra-bootstrap/network.tfstate`
-   - `GITEA_LAN_BIND_HOST` — the LAN IP/host the Gitea SSH listener binds to; the DNS record points at this (already set up in plan #1; same Secret as where SSH binds)
+   - `GITEA_LAN_HOST` — the LAN IP/host of the Gitea NAS; the DNS record points at this and the Gitea SSH listener binds to it (already set up in plan #1; one Secret, shared by design)
    - `GITEA_LAN_FQDN` — the LAN FQDN for the Gitea record
    - `LAN_DNS` — LAN resolver to dig against in the post-apply verification step (assumed to already exist as a Secret per issue #6's Variables→Secrets migration)
 3. **Verify the bucket prefix exists:** the B2 S3-compat backend will create the key on first `init`, but confirm the bucket exists and the credentials have write access.
