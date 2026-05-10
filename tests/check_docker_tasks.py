@@ -5,6 +5,8 @@ Checks:
   A) network_mode: container:* tasks must not have dns_opts/dns/networks/ports
   B) tailscale_sidecar container task must include TS_ACCEPT_DNS env var
   C) standalone container tasks should have networks defined (warning)
+  D) Gitea Tailscale sidecar tailscale_host_ports must include loopback HTTP
+     AND LAN SSH bindings
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -14,6 +16,11 @@ import sys
 
 ROLES_DIR = "playbooks/roles"
 FORBIDDEN_WITH_CONTAINER_MODE = ["dns_opts", "dns:", "dns_search", "networks", "ports"]
+
+GITEA_HOST_PORTS_REQUIRED = [
+    re.compile(r'^["\']?127\.0\.0\.1:.*:3000["\']?$'),
+    re.compile(r'^["\']?\{\{\s*gitea_lan_bind_host\s*\}\}:\{\{\s*gitea_lan_ssh_port\s*\}\}:22["\']?$'),
+]
 
 
 def split_into_task_blocks(lines):
@@ -120,6 +127,49 @@ def check_file(filepath, errors, warnings):
                     )
 
 
+def check_d_gitea_sidecar_host_ports():
+    """The Gitea Tailscale sidecar must publish loopback HTTP AND LAN SSH."""
+    path = "playbooks/gitea-deploy.yml"
+    try:
+        with open(path) as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        return [f"{path}: file not found"]
+
+    # Find the "Deploy Tailscale sidecar for Gitea" task block
+    blocks = split_into_task_blocks(lines)
+    target = next(
+        (b for b in blocks if any("Deploy Tailscale sidecar for Gitea" in ln for ln in b)),
+        None,
+    )
+    if target is None:
+        return [f"{path}: missing 'Deploy Tailscale sidecar for Gitea' task"]
+
+    # Extract list items under tailscale_host_ports
+    in_list = False
+    items = []
+    for ln in target:
+        s = ln.lstrip()
+        if s.startswith("tailscale_host_ports:"):
+            in_list = True
+            continue
+        if in_list:
+            if s.startswith("- "):
+                items.append(s[2:].strip())
+            elif s and not s.startswith("#") and not ln.startswith(("    ", "\t")):
+                # de-dented out of the list
+                break
+
+    failures = []
+    for required in GITEA_HOST_PORTS_REQUIRED:
+        if not any(required.match(item) for item in items):
+            failures.append(
+                f"{path}: tailscale_host_ports for Gitea sidecar missing entry "
+                f"matching {required.pattern!r}; found: {items}"
+            )
+    return failures
+
+
 def check_tailscale_sidecar(errors):
     """Check B: tailscale_sidecar must have TS_ACCEPT_DNS in env."""
     filepath = f"{ROLES_DIR}/tailscale_sidecar/tasks/main.yml"
@@ -163,6 +213,9 @@ def main():
 
     # Run check B on tailscale_sidecar specifically
     check_tailscale_sidecar(errors)
+
+    # Run check D on the Gitea deploy playbook
+    errors.extend(check_d_gitea_sidecar_host_ports())
 
     # Report results
     for w in warnings:
