@@ -38,4 +38,11 @@ variable "unifi_static_dns" {
     condition     = alltrue([for r in var.unifi_static_dns : contains(["A", "AAAA", "CNAME", "TXT"], r.type)])
     error_message = "Each unifi_static_dns record's type must be A, AAAA, CNAME, or TXT."
   }
+  # Surface duplicate-name errors at variable-validation time with a domain
+  # message rather than at resource-expansion time as a generic HCL
+  # "Duplicate object key" error from the for_each map keying in dns.tf.
+  validation {
+    condition     = length(distinct([for r in var.unifi_static_dns : r.name])) == length(var.unifi_static_dns)
+    error_message = "Each unifi_static_dns record's name must be unique."
+  }
 }

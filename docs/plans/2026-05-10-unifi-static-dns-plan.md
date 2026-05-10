@@ -140,13 +140,15 @@ git commit -m "feat(tofu): scaffold tofu/network module for UniFi LAN config"
 resource "unifi_dns_record" "this" {
   for_each = { for r in var.unifi_static_dns : r.name => r }
 
-  name   = each.value.name
-  value  = each.value.value
-  record = each.value.type
+  name        = each.value.name
+  value       = each.value.value
+  record_type = each.value.type
 }
 ```
 
 Map keying by `name` (rather than list indexing) keeps the resource address `unifi_dns_record.this["<name>"]` stable across list reorderings, so a swap of two list entries in `var.unifi_static_dns` doesn't trigger destroy+recreate.
+
+The provider attribute is `record_type` (not `record`) on `ubiquiti-community/unifi >= 0.41`. The user-facing `var.unifi_static_dns` schema continues to expose this as `type`.
 
 - [ ] **Step 2: Create the fixtures file with synthetic-only values**
 

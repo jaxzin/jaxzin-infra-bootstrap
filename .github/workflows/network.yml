@@ -16,10 +16,14 @@ jobs:
   network:
     runs-on: [self-hosted, linux]
     env:
+      # OpenTofu reads TF_VAR_* into module variables.
       TF_VAR_unifi_api_url:    ${{ secrets.UNIFI_API_URL }}
       TF_VAR_unifi_username:   ${{ secrets.UNIFI_USERNAME }}
       TF_VAR_unifi_password:   ${{ secrets.UNIFI_PASSWORD }}
       TF_VAR_unifi_site:       ${{ secrets.UNIFI_SITE }}
+      # The DNS list is built inline from individual Secrets so this repo's
+      # records stay parameterized via the same env-var pattern as everything
+      # else. Add to TF_VAR_unifi_static_dns if more records land in this repo.
       TF_VAR_unifi_static_dns: |
         [
           {
@@ -28,15 +32,19 @@ jobs:
             "type":  "A"
           }
         ]
+      # S3-compat backend creds (B2)
       AWS_ACCESS_KEY_ID:     ${{ secrets.B2_APPLICATION_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+      # Backend config values
       B2_S3_ENDPOINT:        ${{ secrets.B2_S3_ENDPOINT }}
       B2_REGION:             ${{ secrets.B2_REGION }}
       TOFU_STATE_BUCKET:     ${{ secrets.TOFU_STATE_BUCKET }}
       TOFU_STATE_KEY:        ${{ secrets.TOFU_STATE_KEY }}
+      # For dig verification step
       LAN_DNS:               ${{ secrets.LAN_DNS }}
       GITEA_LAN_FQDN:        ${{ secrets.GITEA_LAN_FQDN }}
-      GITEA_LAN_BIND_HOST:        ${{ secrets.GITEA_LAN_BIND_HOST }}
+      GITEA_LAN_BIND_HOST:   ${{ secrets.GITEA_LAN_BIND_HOST }}
+      # For Discord notification on failure
       DISCORD_WEBHOOK:       ${{ secrets.DISCORD_WEBHOOK }}
 
     defaults:

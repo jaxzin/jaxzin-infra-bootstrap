@@ -43,7 +43,7 @@ jobs:
       # For dig verification step
       LAN_DNS:               ${{ secrets.LAN_DNS }}
       GITEA_LAN_FQDN:        ${{ secrets.GITEA_LAN_FQDN }}
-      GITEA_LAN_BIND_HOST:        ${{ secrets.GITEA_LAN_BIND_HOST }}
+      GITEA_LAN_BIND_HOST:   ${{ secrets.GITEA_LAN_BIND_HOST }}
       # For Discord notification on failure
       DISCORD_WEBHOOK:       ${{ secrets.DISCORD_WEBHOOK }}
 
