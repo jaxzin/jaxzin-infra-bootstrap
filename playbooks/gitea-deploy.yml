@@ -31,7 +31,7 @@
         - gitea_db_password
         - tailscale_tailnet
         - lan_domain
-        - gitea_lan_bind_host
+        - gitea_lan_host
 
     - name: Validate Tailscale auth key
       assert:
@@ -71,7 +71,7 @@
         tailscale_serve_proxy_port: "3000"
         tailscale_host_ports:
           - "127.0.0.1:{{ gitea_port }}:3000"
-          - "{{ gitea_lan_bind_host }}:{{ gitea_lan_ssh_port }}:22"
+          - "{{ gitea_lan_host }}:{{ gitea_lan_ssh_port }}:22"
 
     - name: Include gitea_server role
       include_role:

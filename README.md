@@ -195,7 +195,7 @@ In GitHub (Settings → Secrets and variables → Actions → Secrets):
 | `DNSIMPLE_OAUTH_TOKEN`| DNSimple OAuth Token                               |
 | `GITEA_ADMIN_PASSWORD`| Gitea Admin User Password                          |
 | `GITEA_DB_PASSWORD`   | Gitea Database Password                            |
-| `GITEA_LAN_BIND_HOST` | LAN-facing host/IP the Gitea SSH service binds to (e.g., the NAS LAN IP). Topology — must be a Secret, not a Variable. |
+| `GITEA_LAN_HOST`      | LAN-facing host/IP for Gitea (e.g., the NAS LAN IP). Shared between Plan #1 (SSH bind) and Plan #2 (UniFi static DNS). Topology — must be a Secret, not a Variable. |
 | `GITEA_LAN_SSH_PORT`  | LAN port for Gitea SSH (defaults to `2222` if unset). Pick a non-22 port to avoid collision with the host sshd. |
 | `TS_AUTHKEY`          | Tailscale auth key (reusable, non-ephemeral)       |
 

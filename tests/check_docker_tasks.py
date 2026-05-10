@@ -19,7 +19,7 @@ FORBIDDEN_WITH_CONTAINER_MODE = ["dns_opts", "dns:", "dns_search", "networks", "
 
 GITEA_HOST_PORTS_REQUIRED = [
     re.compile(r'^["\']?127\.0\.0\.1:.*:3000["\']?$'),
-    re.compile(r'^["\']?\{\{\s*gitea_lan_bind_host\s*\}\}:\{\{\s*gitea_lan_ssh_port\s*\}\}:22["\']?$'),
+    re.compile(r'^["\']?\{\{\s*gitea_lan_host\s*\}\}:\{\{\s*gitea_lan_ssh_port\s*\}\}:22["\']?$'),
 ]
 
 

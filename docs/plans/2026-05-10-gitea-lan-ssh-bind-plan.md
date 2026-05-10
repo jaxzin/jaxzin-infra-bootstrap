@@ -4,7 +4,7 @@
 
 **Goal:** Expose Gitea's SSH service on the NAS LAN interface (in addition to the existing tailnet path) so LAN clients — including Home Assistant addon containers that have no tailnet access — can perform git push/pull over SSH using a configurable LAN host:port.
 
-**Architecture:** Add two new env-driven variables (`gitea_lan_bind_host`, `gitea_lan_ssh_port`) to `playbooks/vars/main.yml`. Append a new entry to the `tailscale_host_ports` list passed to the Gitea Tailscale sidecar in `playbooks/gitea-deploy.yml`, binding `<lan-host>:<lan-port>` to the container's internal SSH port (`22`). The container shares its network namespace with the sidecar (`network_mode: container:`), so the sidecar's host-port publication is what makes the SSH listener reachable from the LAN. New values flow from CI Secrets → workflow env → playbook vars (mirrors the existing pattern; uses Secrets — not Variables — because both values are topology and must not appear in public workflow logs).
+**Architecture:** Add two new env-driven variables (`gitea_lan_host`, `gitea_lan_ssh_port`) to `playbooks/vars/main.yml`. Append a new entry to the `tailscale_host_ports` list passed to the Gitea Tailscale sidecar in `playbooks/gitea-deploy.yml`, binding `<lan-host>:<lan-port>` to the container's internal SSH port (`22`). The container shares its network namespace with the sidecar (`network_mode: container:`), so the sidecar's host-port publication is what makes the SSH listener reachable from the LAN. New values flow from CI Secrets → workflow env → playbook vars (mirrors the existing pattern; uses Secrets — not Variables — because both values are topology and must not appear in public workflow logs).
 
 **Tech Stack:** Ansible, Docker (`community.docker.docker_container`), GitHub Actions, Gitea Actions
 
@@ -31,19 +31,19 @@ Add the following lines immediately after the `gitea_ssh_listen_port` definition
 ```yaml
 # LAN-side SSH binding: makes Gitea SSH reachable from non-tailnet LAN clients
 # (e.g., Home Assistant addon containers). Bound on the host's LAN interface
-# at gitea_lan_bind_host:gitea_lan_ssh_port → container's internal :22.
+# at gitea_lan_host:gitea_lan_ssh_port → container's internal :22.
 # Both values must come from CI Secrets (not Variables) because they're topology.
-gitea_lan_bind_host: "{{ lookup('ansible.builtin.env', 'GITEA_LAN_BIND_HOST') }}"
+gitea_lan_host: "{{ lookup('ansible.builtin.env', 'GITEA_LAN_HOST') }}"
 gitea_lan_ssh_port: "{{ lookup('ansible.builtin.env', 'GITEA_LAN_SSH_PORT') | default('2222', true) }}"
 ```
 
-`gitea_lan_bind_host` has no default — the deployment must specify it. `gitea_lan_ssh_port` defaults to `2222` so a missing value doesn't accidentally bind on `:22` (which would conflict with the host sshd) or silently use the empty string.
+`gitea_lan_host` has no default — the deployment must specify it. `gitea_lan_ssh_port` defaults to `2222` so a missing value doesn't accidentally bind on `:22` (which would conflict with the host sshd) or silently use the empty string.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add playbooks/vars/main.yml
-git commit -m "feat(gitea): add gitea_lan_bind_host/port vars for LAN SSH binding"
+git commit -m "feat(gitea): add gitea_lan_host/port vars for LAN SSH binding"
 ```
 
 ---
@@ -59,7 +59,7 @@ Open `playbooks/gitea-deploy.yml` and find the `Validate required variables` tas
 
 - [ ] **Step 2: Add the new variable to the validation loop**
 
-Add `gitea_lan_bind_host` to the loop. Do NOT add `gitea_lan_ssh_port` — it has a default and is therefore not required. The block should look like:
+Add `gitea_lan_host` to the loop. Do NOT add `gitea_lan_ssh_port` — it has a default and is therefore not required. The block should look like:
 
 ```yaml
 - name: Validate required variables
@@ -79,14 +79,14 @@ Add `gitea_lan_bind_host` to the loop. Do NOT add `gitea_lan_ssh_port` — it ha
     - gitea_db_password
     - tailscale_tailnet
     - lan_domain
-    - gitea_lan_bind_host
+    - gitea_lan_host
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add playbooks/gitea-deploy.yml
-git commit -m "chore(deploy): validate gitea_lan_bind_host before provisioning"
+git commit -m "chore(deploy): validate gitea_lan_host before provisioning"
 ```
 
 ---
@@ -114,7 +114,7 @@ Replace the `tailscale_host_ports` block with:
 ```yaml
         tailscale_host_ports:
           - "127.0.0.1:{{ gitea_port }}:3000"
-          - "{{ gitea_lan_bind_host }}:{{ gitea_lan_ssh_port }}:22"
+          - "{{ gitea_lan_host }}:{{ gitea_lan_ssh_port }}:22"
 ```
 
 The internal port is `22` — the container's actual SSH listener — not `gitea_ssh_listen_port` (`2222`), which is the *Tailscale Serve* TCPForward target on the tailnet side. The two paths (tailnet via Serve, LAN via host-port) are independent and both ultimately reach the same container :22.
@@ -131,7 +131,7 @@ Expected: no errors.
 
 ```bash
 git add playbooks/gitea-deploy.yml
-git commit -m "feat(gitea): expose Gitea SSH on LAN via gitea_lan_bind_host:port"
+git commit -m "feat(gitea): expose Gitea SSH on LAN via gitea_lan_host:port"
 ```
 
 ---
@@ -150,7 +150,7 @@ In `.github/workflows/common-bootstrap.yml`, the `env:` block (around lines 16�
 Insert these two lines somewhere in the `env:` block (alphabetical position is fine, or grouped with other `GITEA_*` entries):
 
 ```yaml
-      GITEA_LAN_BIND_HOST: ${{ secrets.GITEA_LAN_BIND_HOST }}
+      GITEA_LAN_HOST: ${{ secrets.GITEA_LAN_HOST }}
       GITEA_LAN_SSH_PORT: ${{ secrets.GITEA_LAN_SSH_PORT }}
 ```
 
@@ -160,7 +160,7 @@ Both reference `secrets.*`, never `vars.*`. The values are topology and must not
 
 ```bash
 git add .github/workflows/common-bootstrap.yml
-git commit -m "ci(github): pass GITEA_LAN_BIND_HOST/PORT secrets to bootstrap"
+git commit -m "ci(github): pass GITEA_LAN_HOST/PORT secrets to bootstrap"
 ```
 
 ---
@@ -179,7 +179,7 @@ Open `.gitea/workflows/deploy.yml`. Identify the equivalent `env:` block (or the
 Mirror the change from Task 4 — add:
 
 ```yaml
-      GITEA_LAN_BIND_HOST: ${{ secrets.GITEA_LAN_BIND_HOST }}
+      GITEA_LAN_HOST: ${{ secrets.GITEA_LAN_HOST }}
       GITEA_LAN_SSH_PORT: ${{ secrets.GITEA_LAN_SSH_PORT }}
 ```
 
@@ -189,7 +189,7 @@ If `.gitea/workflows/deploy.yml` uses a different shape (e.g., `inputs` or a sep
 
 ```bash
 git add .gitea/workflows/deploy.yml
-git commit -m "ci(gitea): pass GITEA_LAN_BIND_HOST/PORT secrets to deploy"
+git commit -m "ci(gitea): pass GITEA_LAN_HOST/PORT secrets to deploy"
 ```
 
 ---
@@ -208,7 +208,7 @@ In `README.md`, find the table that lists `Secret | Value/Purpose` (around lines
 Add the following two rows to the Secrets table, alphabetically positioned (between `B2_BUCKET_NAME` and `DISCORD_WEBHOOK` placement-wise):
 
 ```markdown
-| `GITEA_LAN_BIND_HOST`   | LAN-facing host/IP the Gitea SSH service binds to (e.g., the NAS LAN IP). Topology — must be a Secret, not a Variable. |
+| `GITEA_LAN_HOST`   | LAN-facing host/IP the Gitea SSH service binds to (e.g., the NAS LAN IP). Topology — must be a Secret, not a Variable. |
 | `GITEA_LAN_SSH_PORT`    | LAN port for Gitea SSH (defaults to `2222` if unset). Pick a non-22 port to avoid collision with the host sshd. |
 ```
 
@@ -216,7 +216,7 @@ Add the following two rows to the Secrets table, alphabetically positioned (betw
 
 ```bash
 git add README.md
-git commit -m "docs: document GITEA_LAN_BIND_HOST/PORT secrets"
+git commit -m "docs: document GITEA_LAN_HOST/PORT secrets"
 ```
 
 ---
@@ -241,12 +241,12 @@ Add a new check `Check D` that:
 2. Locates the `Deploy Tailscale sidecar for Gitea` task block.
 3. Asserts that the `tailscale_host_ports` list contains BOTH:
    - An entry matching `r'^127\.0\.0\.1:.*:3000$'` (the existing HTTP loopback)
-   - An entry matching `r'^\{\{\s*gitea_lan_bind_host\s*\}\}:\{\{\s*gitea_lan_ssh_port\s*\}\}:22$'` (the new LAN SSH binding, in template form because the file is unrendered)
+   - An entry matching `r'^\{\{\s*gitea_lan_host\s*\}\}:\{\{\s*gitea_lan_ssh_port\s*\}\}:22$'` (the new LAN SSH binding, in template form because the file is unrendered)
 
 ```python
 GITEA_HOST_PORTS_REQUIRED = [
     re.compile(r'^["\']?127\.0\.0\.1:.*:3000["\']?$'),
-    re.compile(r'^["\']?\{\{\s*gitea_lan_bind_host\s*\}\}:\{\{\s*gitea_lan_ssh_port\s*\}\}:22["\']?$'),
+    re.compile(r'^["\']?\{\{\s*gitea_lan_host\s*\}\}:\{\{\s*gitea_lan_ssh_port\s*\}\}:22["\']?$'),
 ]
 
 def check_d_gitea_sidecar_host_ports():
@@ -324,14 +324,14 @@ This task is **not** part of CI. It runs after a real deploy to confirm the bind
 
 - [ ] **Step 1: Run a deploy that picks up the new vars**
 
-Trigger the normal Gitea deployment workflow (Gitea push to `main` → Gitea Actions, or GitHub `bootstrap.yml` for DR). Confirm the workflow run sets the `GITEA_LAN_BIND_HOST` and `GITEA_LAN_SSH_PORT` secrets in its env, and that Ansible reports the Gitea sidecar container as `changed` (re-created with the new port binding).
+Trigger the normal Gitea deployment workflow (Gitea push to `main` → Gitea Actions, or GitHub `bootstrap.yml` for DR). Confirm the workflow run sets the `GITEA_LAN_HOST` and `GITEA_LAN_SSH_PORT` secrets in its env, and that Ansible reports the Gitea sidecar container as `changed` (re-created with the new port binding).
 
 - [ ] **Step 2: Verify the host port is listening on the LAN interface**
 
 From a LAN client (NOT via tailnet — pick a device with no tailnet access, e.g., a phone on the regular Wi-Fi):
 
 ```bash
-nc -vz <GITEA_LAN_BIND_HOST> <GITEA_LAN_SSH_PORT>
+nc -vz <GITEA_LAN_HOST> <GITEA_LAN_SSH_PORT>
 ```
 
 Expected: `succeeded` / connection open.
@@ -339,7 +339,7 @@ Expected: `succeeded` / connection open.
 - [ ] **Step 3: Verify the SSH listener responds with Gitea's banner (not the host sshd)**
 
 ```bash
-ssh -T -p <GITEA_LAN_SSH_PORT> git@<GITEA_LAN_BIND_HOST>
+ssh -T -p <GITEA_LAN_SSH_PORT> git@<GITEA_LAN_HOST>
 ```
 
 Expected, when no key is registered: `Permission denied (publickey).` — *clean publickey rejection from Gitea, not a password prompt from Synology DSM's bare-metal sshd*. If you see a password prompt, you've hit the wrong listener — port collision; re-pick `GITEA_LAN_SSH_PORT`.
