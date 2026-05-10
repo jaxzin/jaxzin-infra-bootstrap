@@ -28,7 +28,7 @@ jobs:
         [
           {
             "name":  "${{ secrets.GITEA_LAN_FQDN }}",
-            "value": "${{ secrets.GITEA_LAN_HOST }}",
+            "value": "${{ secrets.GITEA_LAN_BIND_HOST }}",
             "type":  "A"
           }
         ]
@@ -43,7 +43,7 @@ jobs:
       # For dig verification step
       LAN_DNS:               ${{ secrets.LAN_DNS }}
       GITEA_LAN_FQDN:        ${{ secrets.GITEA_LAN_FQDN }}
-      GITEA_LAN_HOST:        ${{ secrets.GITEA_LAN_HOST }}
+      GITEA_LAN_BIND_HOST:        ${{ secrets.GITEA_LAN_BIND_HOST }}
       # For Discord notification on failure
       DISCORD_WEBHOOK:       ${{ secrets.DISCORD_WEBHOOK }}
 
@@ -101,11 +101,11 @@ jobs:
           # Allow the controller a moment to propagate to dnsmasq.
           for i in 1 2 3 4 5 6; do
             result=$(dig +short "${GITEA_LAN_FQDN}" @"${LAN_DNS}")
-            if [ "${result}" = "${GITEA_LAN_HOST}" ]; then
+            if [ "${result}" = "${GITEA_LAN_BIND_HOST}" ]; then
               echo "dig verification OK"
               exit 0
             fi
-            echo "attempt ${i}: got '${result}', expected '${GITEA_LAN_HOST}'; sleeping 5s"
+            echo "attempt ${i}: got '${result}', expected '${GITEA_LAN_BIND_HOST}'; sleeping 5s"
             sleep 5
           done
           echo "ERROR: DNS did not propagate to expected value within 30s"

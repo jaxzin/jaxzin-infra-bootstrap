@@ -54,7 +54,7 @@ jobs:
         [
           {
             "name":  "${{ secrets.GITEA_LAN_FQDN }}",
-            "value": "${{ secrets.GITEA_LAN_HOST }}",
+            "value": "${{ secrets.GITEA_LAN_BIND_HOST }}",
             "type":  "A"
           }
         ]
