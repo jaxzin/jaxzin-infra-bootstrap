@@ -11,7 +11,7 @@
       syno_pkg_state: present
       tags: docker
   tasks:
-    - name: Debug all environment variables                                                                                            │
+    - name: Debug all environment variables
       debug:
         var: ansible_env
     - name: Validate required variables
