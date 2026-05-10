@@ -40,6 +40,7 @@ These steps cannot be code (they bootstrap the credentials code uses).
    - `UNIFI_PASSWORD` — that user's password
    - `UNIFI_SITE` — typically `default`
    - `B2_S3_ENDPOINT` — B2 S3-compat endpoint URL (e.g., `https://s3.us-west-002.backblazeb2.com`)
+   - `B2_REGION` — B2 region identifier (e.g., `us-west-002`); kept as a Secret so the operator can change region without editing workflow files
    - `TOFU_STATE_BUCKET` — bucket name (set to the same value as `B2_BUCKET_NAME` initially)
    - `TOFU_STATE_KEY` — `tofu-state/jaxzin-infra-bootstrap/network.tfstate`
    - `GITEA_LAN_HOST` — the LAN IP for the Gitea record (already set up in plan #1)

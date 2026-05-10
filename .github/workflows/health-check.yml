@@ -61,6 +61,7 @@ jobs:
       AWS_ACCESS_KEY_ID:     ${{ secrets.B2_APPLICATION_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_APPLICATION_KEY }}
       B2_S3_ENDPOINT:        ${{ secrets.B2_S3_ENDPOINT }}
+      B2_REGION:             ${{ secrets.B2_REGION }}
       TOFU_STATE_BUCKET:     ${{ secrets.TOFU_STATE_BUCKET }}
       TOFU_STATE_KEY:        ${{ secrets.TOFU_STATE_KEY }}
     defaults:
@@ -80,7 +81,7 @@ jobs:
             -backend-config="endpoint=${B2_S3_ENDPOINT}" \
             -backend-config="bucket=${TOFU_STATE_BUCKET}" \
             -backend-config="key=${TOFU_STATE_KEY}" \
-            -backend-config="region=us-west-002" \
+            -backend-config="region=${B2_REGION}" \
             -backend-config="skip_credentials_validation=true" \
             -backend-config="skip_metadata_api_check=true" \
             -backend-config="skip_region_validation=true" \
