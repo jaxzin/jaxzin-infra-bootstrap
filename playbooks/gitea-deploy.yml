@@ -31,6 +31,7 @@
         - gitea_db_password
         - tailscale_tailnet
         - lan_domain
+        - gitea_lan_bind_host
 
     - name: Validate Tailscale auth key
       assert:
