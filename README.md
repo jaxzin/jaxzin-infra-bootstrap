@@ -184,18 +184,24 @@ environment in your own repository settings.
 
 In GitHub (Settings → Secrets and variables → Actions → Secrets):
 
-| Secret                | Value/Purpose                                      |
-| --------------------- | -------------------------------------------------- |
-| `SSH_KEY`             | SSH private key for NAS                            |
-| `NAS_SSH_PASSWORD`    | NAS SSH user password                              |
-| `B2_APPLICATION_KEY`    | Backblaze B2 Application Key                     |
-| `B2_APPLICATION_KEY_ID` | Backblaze B2 Application Key ID                  |
-| `B2_BUCKET_NAME`      | Backblaze B2 Bucket Name                           |
-| `DISCORD_WEBHOOK`     | Discord webhook for alerts                         |
-| `DNSIMPLE_OAUTH_TOKEN`| DNSimple OAuth Token                               |
-| `GITEA_ADMIN_PASSWORD`| Gitea Admin User Password                          |
-| `GITEA_DB_PASSWORD`   | Gitea Database Password                            |
-| `TS_AUTHKEY`          | Tailscale auth key (reusable, non-ephemeral)       |
+| Secret                  | Value/Purpose                                                          |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `SSH_KEY`               | SSH private key for NAS                                                |
+| `NAS_SSH_PASSWORD`      | NAS SSH user password                                                  |
+| `NAS_SSH_USER`          | NAS SSH user (topology)                                                |
+| `NAS_HOST`              | FQDN/IP of NAS (topology)                                              |
+| `LAN_DNS`               | DNS server for container resolution of `NAS_HOST` (topology)           |
+| `B2_APPLICATION_KEY`    | Backblaze B2 Application Key                                           |
+| `B2_APPLICATION_KEY_ID` | Backblaze B2 Application Key ID                                        |
+| `B2_BUCKET_NAME`        | Backblaze B2 Bucket Name                                               |
+| `DISCORD_WEBHOOK`       | Discord webhook for alerts                                             |
+| `DNSIMPLE_OAUTH_TOKEN`  | DNSimple OAuth Token                                                   |
+| `GITEA_ADMIN_PASSWORD`  | Gitea Admin User Password                                              |
+| `GITEA_DB_PASSWORD`     | Gitea Database Password                                                |
+| `TS_AUTHKEY`            | Tailscale auth key (reusable, non-ephemeral)                           |
+| `TS_TAILNET`            | Tailscale tailnet domain, e.g. `your-tailnet.ts.net` (topology secret) |
+
+> Topology values (`NAS_HOST`, `NAS_SSH_USER`, `LAN_DNS`, `TS_TAILNET`) are stored as Secrets — not Variables — because Actions Variables are not redacted in workflow logs and this repo is mirrored to a public GitHub presence. See issue #6.
 
 In GitHub (Settings → Secrets and variables → Actions → Variables):
 
@@ -204,10 +210,6 @@ In GitHub (Settings → Secrets and variables → Actions → Variables):
 | `CERTBOT_EMAIL`       | Certbot Email Address                              |
 | `GITEA_ADMIN_USERNAME`| Gitea Admin Username                               |
 | `GITEA_ADMIN_EMAIL`   | Gitea Admin Email                                  |
-| `NAS_HOST`            | FQDN/IP of NAS                                     |
-| `NAS_SSH_USER`        | NAS SSH user                                       |
-| `TS_TAILNET`          | Your Tailscale tailnet domain (e.g. `your-tailnet.ts.net`) |
-| `LAN_DNS`             | DNS server for container resolution of `NAS_HOST`          |
 
 ### 3. Self-hosting a GitHub Runner
 

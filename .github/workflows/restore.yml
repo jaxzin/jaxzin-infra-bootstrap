@@ -14,8 +14,8 @@ jobs:
       B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
       B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
       GITEA_DB_PASSWORD: ${{ secrets.GITEA_DB_PASSWORD }}
-      NAS_HOST: ${{ vars.NAS_HOST }}
-      NAS_SSH_USER: ${{ vars.NAS_SSH_USER }}
+      NAS_HOST: ${{ secrets.NAS_HOST }}
+      NAS_SSH_USER: ${{ secrets.NAS_SSH_USER }}
       NAS_SSH_PASSWORD: ${{ secrets.NAS_SSH_PASSWORD }}
     steps:
       - name: Checkout code
@@ -44,5 +44,5 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           inventory: |
             [nas]
-            ${{ vars.NAS_HOST }} ansible_user="${{ vars.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
+            ${{ secrets.NAS_HOST }} ansible_user="${{ secrets.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
           requirements: galaxy-requirements.yml
