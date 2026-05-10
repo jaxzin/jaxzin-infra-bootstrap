@@ -56,8 +56,8 @@ jobs:
       TF_VAR_unifi_static_dns: |
         [
           {
-            "name":  "${{ secrets.GITEA_LAN_FQDN }}",
-            "value": "${{ secrets.GITEA_LAN_HOST }}",
+            "name":  "${{ secrets.GITEA_LAN_FQDN || secrets.MYGITEA_LAN_FQDN }}",
+            "value": "${{ secrets.GITEA_LAN_HOST || secrets.MYGITEA_LAN_HOST }}",
             "type":  "A"
           }
         ]

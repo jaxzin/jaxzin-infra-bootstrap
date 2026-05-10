@@ -27,8 +27,8 @@ jobs:
       TF_VAR_unifi_static_dns: |
         [
           {
-            "name":  "${{ secrets.GITEA_LAN_FQDN }}",
-            "value": "${{ secrets.GITEA_LAN_HOST }}",
+            "name":  "${{ secrets.GITEA_LAN_FQDN || secrets.MYGITEA_LAN_FQDN }}",
+            "value": "${{ secrets.GITEA_LAN_HOST || secrets.MYGITEA_LAN_HOST }}",
             "type":  "A"
           }
         ]
@@ -42,8 +42,8 @@ jobs:
       TOFU_STATE_KEY:        ${{ secrets.TOFU_STATE_KEY }}
       # For dig verification step
       LAN_DNS:               ${{ secrets.LAN_DNS }}
-      GITEA_LAN_FQDN:        ${{ secrets.GITEA_LAN_FQDN }}
-      GITEA_LAN_HOST:        ${{ secrets.GITEA_LAN_HOST }}
+      GITEA_LAN_FQDN:        ${{ secrets.GITEA_LAN_FQDN || secrets.MYGITEA_LAN_FQDN }}
+      GITEA_LAN_HOST:        ${{ secrets.GITEA_LAN_HOST || secrets.MYGITEA_LAN_HOST }}
       # For Discord notification on failure
       DISCORD_WEBHOOK:       ${{ secrets.DISCORD_WEBHOOK }}
 
