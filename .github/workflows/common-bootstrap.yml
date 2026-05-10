@@ -12,7 +12,7 @@ jobs:
     runs-on: [self-hosted, linux]
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
-      options: --dns ${{ vars.LAN_DNS }}
+      options: --dns ${{ secrets.LAN_DNS }}
     env:
       CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
@@ -25,12 +25,12 @@ jobs:
       B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
       B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
       B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
-      NAS_HOST: ${{ vars.NAS_HOST }}
-      NAS_SSH_USER: ${{ vars.NAS_SSH_USER }}
+      NAS_HOST: ${{ secrets.NAS_HOST }}
+      NAS_SSH_USER: ${{ secrets.NAS_SSH_USER }}
       NAS_SSH_PASSWORD: ${{ secrets.NAS_SSH_PASSWORD }}
       SSH_KEY: ${{ secrets.SSH_KEY }}
       TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
-      TS_TAILNET: ${{ vars.TS_TAILNET }}
+      TS_TAILNET: ${{ secrets.TS_TAILNET }}
     steps:
       - name: Checkout IaC
         uses: actions/checkout@v4
@@ -60,6 +60,6 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           inventory: |
             [nas]
-            ${{ vars.NAS_HOST }} ansible_user="${{ vars.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
+            ${{ secrets.NAS_HOST }} ansible_user="${{ secrets.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
           requirements: galaxy-requirements.yml
           options: ${{ inputs.dry_run && '--check --diff' || '' }}
