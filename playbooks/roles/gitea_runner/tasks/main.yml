@@ -91,6 +91,11 @@
       DOCKER_INSECURE_NO_IPTABLES_RAW: "1" # needed for Docker-in-Docker on the Synology DSM which does not include iptables_raw kernel module
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
+      # dind's docker-init writes TLS server+client certs into /certs on first
+      # start. Sharing this as a named volume lets job containers mount
+      # /certs/client read-only so their docker CLI can speak TLS to the dind
+      # dockerd (see container.options in templates/config.yaml.j2).
+      - "gitea-runner-certs:/certs"
     healthcheck:
       test: ["CMD-SHELL", "grep -q act_runner /proc/[0-9]*/comm 2>/dev/null || exit 1"]
       interval: 60s
@@ -120,6 +125,11 @@
       DOCKER_INSECURE_NO_IPTABLES_RAW: "1" # needed for Docker-in-Docker on the Synology DSM which does not include iptables_raw kernel module
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
+      # dind's docker-init writes TLS server+client certs into /certs on first
+      # start. Sharing this as a named volume lets job containers mount
+      # /certs/client read-only so their docker CLI can speak TLS to the dind
+      # dockerd (see container.options in templates/config.yaml.j2).
+      - "gitea-runner-certs:/certs"
     healthcheck:
       test: ["CMD-SHELL", "grep -q act_runner /proc/[0-9]*/comm 2>/dev/null || exit 1"]
       interval: 60s
