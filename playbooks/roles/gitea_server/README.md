@@ -1,6 +1,6 @@
 # gitea_server
 
-Deploys and manages the homelab Gitea server and its PostgreSQL database. See `meta/main.yml` for the full argument spec.
+Deploys and manages the homelab Gitea server and its MySQL database. See `meta/main.yml` for the full argument spec.
 
 ## Manually-managed state (TODO: capture as code)
 
