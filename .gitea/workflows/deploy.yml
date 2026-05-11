@@ -9,4 +9,8 @@ jobs:
     uses: ./.github/workflows/common-bootstrap.yml
     with:
       dry_run: false
+      # common-bootstrap.yml's container.options cannot reference secrets
+      # directly (evaluated at workflow-load time, before secrets context
+      # is in scope); pass the value as an explicit input instead.
+      lan_dns: ${{ secrets.LAN_DNS }}
     secrets: inherit
