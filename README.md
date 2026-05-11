@@ -65,12 +65,13 @@ Makefile                        # Makefile for common tasks
 flowchart TB
     subgraph Tailnet["Tailscale Tailnet"]
         TG_TS["tailscale-gitea<br/>(TS_SERVE: HTTPS → HTTP :3000)"]
-        TR_TS["tailscale-runner<br/>(tailnet access only)"]
+        TR_TS["tailscale-runner<br/>(userspace mode, exposes :1055 SOCKS5 / :1099 HTTP CONNECT)"]
     end
     subgraph DockerNet["gitea-net (Docker Bridge)"]
         TG_TS --- |"network_mode: container"| Gitea["gitea<br/>(HTTP :3000, SSH :22)"]
         DB["gitea-db<br/>(MySQL :3306)"]
-        TR_TS --- |"network_mode: container"| Runner["gitea-runner<br/>(Act Runner)"]
+        Runner["gitea-runner<br/>(Act Runner)"] --- |"on gitea-net"| TR_TS
+        Runner -.->|"HTTPS_PROXY :1099"| TR_TS
     end
     Gitea --> |"gitea-db:3306"| DB
     Runner --> |"https://gitea.tailnet"| TG_TS
