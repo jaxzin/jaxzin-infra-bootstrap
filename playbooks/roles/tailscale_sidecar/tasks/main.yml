@@ -37,9 +37,14 @@
       - name: "{{ tailscale_network_name }}"
     ports: "{{ tailscale_host_ports | default([], true) }}"
     dns_servers: "{{ ['100.100.100.100'] if not (tailscale_accept_dns | default(true) | bool) else omit }}"
-    capabilities:
-      - NET_ADMIN
-      - SYS_MODULE
+    # Kernel-mode Tailscale needs CAP_NET_ADMIN + CAP_SYS_MODULE plus the
+    # /dev/net/tun device to bring up its kernel TUN interface. Userspace
+    # mode (TS_USERSPACE=true) routes WireGuard packets entirely in user
+    # space, so neither the capabilities nor the device node are needed.
+    # Granting them anyway over-grants privileges and contradicts the
+    # architecture rationale for choosing userspace mode in the first
+    # place. Conditional: kernel mode only.
+    capabilities: "{{ ['NET_ADMIN', 'SYS_MODULE'] if not (tailscale_userspace_networking | default(false) | bool) else omit }}"
     env:
       TS_HOSTNAME: "{{ tailscale_hostname }}"
       TS_AUTHKEY: "{{ tailscale_authkey }}"
@@ -48,10 +53,19 @@
       TS_ACCEPT_DNS: "{{ tailscale_accept_dns | default(true) | string | lower }}"
       TS_SERVE_CONFIG: "{{ '/etc/tailscale/serve.json' if (tailscale_serve_enabled | bool) else omit }}"
       TS_EXTRA_ARGS: "{{ tailscale_extra_args | default(omit, true) }}"
+      # In userspace networking mode, expose SOCKS5 (1055) and HTTP CONNECT
+      # (1099) proxies so peer containers on the same Docker network can
+      # route outbound tailnet traffic through this sidecar without sharing
+      # its network namespace. See https://tailscale.com/kb/1112/userspace-networking
+      TS_SOCKS5_SERVER: "{{ ':1055' if (tailscale_userspace_networking | default(false) | bool) else omit }}"
+      TS_OUTBOUND_HTTP_PROXY_LISTEN: "{{ ':1099' if (tailscale_userspace_networking | default(false) | bool) else omit }}"
+    # /dev/net/tun is bind-mounted only in kernel mode (see capabilities
+    # comment above). Userspace mode never opens the device.
     volumes: >-
       {{
-        [tailscale_state_dir + ':/var/lib/tailscale',
-         '/dev/net/tun:/dev/net/tun']
+        [tailscale_state_dir + ':/var/lib/tailscale']
+        + (['/dev/net/tun:/dev/net/tun']
+           if not (tailscale_userspace_networking | default(false) | bool) else [])
         + ([tailscale_serve_config_dir + ':/etc/tailscale:ro']
            if (tailscale_serve_enabled | bool) else [])
       }}

@@ -81,14 +81,34 @@
     image: "{{ gitea_runner_image }}"
     state: started
     restart_policy: always
-    network_mode: "container:{{ tailscale_runner_container_name }}"
+    # Was: network_mode: "container:{{ tailscale_runner_container_name }}"
+    # That share collapsed all egress through the sidecar's tailnet-only
+    # interfaces, breaking LAN access for dind-spawned job containers
+    # (they could reach 100.64.0.0/10 via tailscale0 but not 192.168.x.x).
+    # Now: runner sits on the same Docker bridge as the userspace-mode
+    # sidecar, has direct LAN access via the host, and reaches the tailnet
+    # by HTTPS_PROXY/SOCKS5 through the sidecar.
+    networks:
+      - name: "{{ gitea_network_name }}"
     privileged: true
-    env:
-      CONFIG_FILE: "/data/conf/config.yml"
-      GITEA_INSTANCE_URL: "{{ gitea_instance_url }}"
-      GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
-      GITEA_RUNNER_NAME: "nas-runner"
-      DOCKER_INSECURE_NO_IPTABLES_RAW: "1" # needed for Docker-in-Docker on the Synology DSM which does not include iptables_raw kernel module
+    # Outbound HTTPS to the Gitea tailnet URL routes through the sidecar's
+    # userspace HTTP CONNECT proxy (HTTPS_PROXY/HTTP_PROXY) and SOCKS5
+    # (ALL_PROXY). LAN destinations bypass the proxy via NO_PROXY so they
+    # egress directly through the host's LAN interface. The shared
+    # gitea_runner_proxy_env dict (see defaults/main.yml) is also rendered
+    # into the runner config so dind-spawned job containers inherit the
+    # same proxy env.
+    #
+    # DOCKER_INSECURE_NO_IPTABLES_RAW=1 is required for the embedded
+    # Docker-in-Docker dockerd on Synology DSM, which does not include
+    # the iptables_raw kernel module.
+    env: "{{ gitea_runner_proxy_env | combine({
+      'CONFIG_FILE': '/data/conf/config.yml',
+      'GITEA_INSTANCE_URL': gitea_instance_url,
+      'GITEA_RUNNER_REGISTRATION_TOKEN': gitea_runner_token,
+      'GITEA_RUNNER_NAME': 'nas-runner',
+      'DOCKER_INSECURE_NO_IPTABLES_RAW': '1',
+    }) }}"
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
       # dind's docker-init writes TLS server+client certs into /certs on first

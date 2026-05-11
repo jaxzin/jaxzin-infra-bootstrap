@@ -4,6 +4,12 @@
 # =============================================================================
 tailscale_tailnet: "{{ lookup('ansible.builtin.env', 'TS_TAILNET') }}"
 lan_domain: "{{ lookup('ansible.builtin.env', 'NAS_HOST') }}"
+# LAN DNS suffix (e.g. ".lan.example.com") used for NO_PROXY exemption
+# inside the gitea-runner so LAN hostnames bypass the userspace tailnet
+# proxy. Treated as topology (a Secret on both GitHub and Gitea Actions);
+# never bake the literal value into committed config. Must include the
+# leading dot (NO_PROXY treats a leading dot as a domain-suffix match).
+lan_domain_suffix: "{{ lookup('ansible.builtin.env', 'LAN_DOMAIN_SUFFIX') | default('', true) }}"
 
 # =============================================================================
 # Tailscale sidecar configuration

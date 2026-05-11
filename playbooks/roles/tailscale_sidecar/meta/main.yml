@@ -63,6 +63,23 @@ argument_specs:
         required: false
         default: true
         description: "Accept DNS configuration from the tailnet (MagicDNS). Required for resolving tailnet hostnames."
+      tailscale_userspace_networking:
+        type: "bool"
+        required: false
+        default: false
+        description: >
+          Run Tailscale in userspace networking mode (TS_USERSPACE=true).
+          When true, the sidecar additionally exposes a SOCKS5 proxy on
+          :1055 (TS_SOCKS5_SERVER) and an HTTP CONNECT proxy on :1099
+          (TS_OUTBOUND_HTTP_PROXY_LISTEN) so peer containers on the same
+          Docker network can route outbound tailnet traffic through this
+          sidecar without sharing its network namespace. Userspace mode
+          does not require kernel TUN, so /dev/net/tun and the
+          NET_ADMIN/SYS_MODULE capabilities are skipped when this is
+          true. Trade-off: loses Tailscale Serve, exit-node, and
+          subnet-router features (those need kernel TUN). See
+          docs/architecture/tailscale-sidecar-modes.md for the full
+          discussion.
       tailscale_host_ports:
         type: "list"
         required: false

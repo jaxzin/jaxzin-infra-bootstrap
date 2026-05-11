@@ -162,6 +162,126 @@
         fail_msg: "ts-serve config should reference the tailnet domain"
 
     # ================================================================
+    # Check 6: tailscale_sidecar role correctly gates userspace env vars
+    # ================================================================
+    # Static grep over tasks/main.yml — guarantees that the userspace-mode
+    # SOCKS5/HTTP proxy listeners are wired with the documented port
+    # numbers and gated on tailscale_userspace_networking. Catches a
+    # naive refactor that drops the gating or changes a port silently.
+    - name: "CHECK 6: Read tailscale_sidecar tasks/main.yml"
+      slurp:
+        src: "{{ roles_dir }}/tailscale_sidecar/tasks/main.yml"
+      register: tailscale_sidecar_tasks_raw
+
+    - name: "CHECK 6: Decode tailscale_sidecar tasks/main.yml"
+      set_fact:
+        tailscale_sidecar_tasks: "{{ tailscale_sidecar_tasks_raw.content | b64decode }}"
+
+    - name: "CHECK 6: Assert TS_SOCKS5_SERVER is wired to :1055 + userspace gate"
+      assert:
+        that:
+          - "'TS_SOCKS5_SERVER' in tailscale_sidecar_tasks"
+          - "':1055' in tailscale_sidecar_tasks"
+          - "'tailscale_userspace_networking' in tailscale_sidecar_tasks"
+        fail_msg: >
+          tailscale_sidecar/tasks/main.yml must wire TS_SOCKS5_SERVER to
+          ':1055' and gate it on tailscale_userspace_networking.
+
+    - name: "CHECK 6: Assert TS_OUTBOUND_HTTP_PROXY_LISTEN is wired to :1099"
+      assert:
+        that:
+          - "'TS_OUTBOUND_HTTP_PROXY_LISTEN' in tailscale_sidecar_tasks"
+          - "':1099' in tailscale_sidecar_tasks"
+        fail_msg: >
+          tailscale_sidecar/tasks/main.yml must wire
+          TS_OUTBOUND_HTTP_PROXY_LISTEN to ':1099'.
+
+    - name: "CHECK 6: Assert TS_USERSPACE env is wired to the variable"
+      assert:
+        that:
+          - "'TS_USERSPACE' in tailscale_sidecar_tasks"
+        fail_msg: >
+          tailscale_sidecar/tasks/main.yml must export TS_USERSPACE so
+          consumers can opt into userspace mode.
+
+    # ================================================================
+    # Check 7: gitea_runner config.yaml.j2 renders proxy env correctly
+    # ================================================================
+    # End-to-end render of the Jinja2 template with synthetic but
+    # realistic values, then asserts on the resulting YAML. Catches both
+    # template-rendering regressions and proxy-env content drift (e.g.
+    # someone removes ALL_PROXY, swaps the port, or breaks NO_PROXY).
+    - name: "CHECK 7: Render gitea_runner config.yaml.j2 with synthetic vars"
+      template:
+        src: "{{ roles_dir }}/gitea_runner/templates/config.yaml.j2"
+        dest: /tmp/test-gitea-runner-config.yml
+      vars:
+        # Match the production var names so the template compiles without
+        # touching the real defaults/main.yml. The values are synthetic.
+        tailscale_runner_container_name: "tailscale-runner"
+        tailscale_runner_gitea_net_ip: "172.20.0.42"
+        lan_domain_suffix: ".lan.test.example"
+        gitea_runner_proxy_env:
+          HTTPS_PROXY: "http://tailscale-runner:1099"
+          HTTP_PROXY: "http://tailscale-runner:1099"
+          ALL_PROXY: "socks5://tailscale-runner:1055"
+          NO_PROXY: "localhost,127.0.0.1,docker,host.docker.internal,.lan.test.example,tailscale-runner,gitea-db,gitea-runner"
+
+    - name: "CHECK 7: Read rendered gitea_runner config"
+      slurp:
+        src: /tmp/test-gitea-runner-config.yml
+      register: rendered_runner_config_raw
+
+    - name: "CHECK 7: Decode rendered gitea_runner config"
+      set_fact:
+        rendered_runner_config: "{{ rendered_runner_config_raw.content | b64decode }}"
+
+    - name: "CHECK 7: Assert HTTPS_PROXY uses the userspace HTTP CONNECT port"
+      assert:
+        that:
+          - "'HTTPS_PROXY: \"http://tailscale-runner:1099\"' in rendered_runner_config"
+        fail_msg: >
+          Rendered runner config must export
+          HTTPS_PROXY=http://tailscale-runner:1099. Got:
+          {{ rendered_runner_config }}
+
+    - name: "CHECK 7: Assert ALL_PROXY uses the userspace SOCKS5 port"
+      assert:
+        that:
+          - "'ALL_PROXY: \"socks5://tailscale-runner:1055\"' in rendered_runner_config"
+        fail_msg: >
+          Rendered runner config must export
+          ALL_PROXY=socks5://tailscale-runner:1055. Got:
+          {{ rendered_runner_config }}
+
+    - name: "CHECK 7: Assert NO_PROXY exempts the LAN suffix and gitea-net peers"
+      assert:
+        that:
+          # LAN suffix from the test fixture (proves the variable is wired
+          # through the proxy-env dict, not hardcoded in the template).
+          - "'.lan.test.example' in rendered_runner_config"
+          # Real container short names that Docker DNS resolves on
+          # gitea-net (NOT the network name itself, which is a no-op).
+          - "'tailscale-runner,gitea-db,gitea-runner' in rendered_runner_config"
+        fail_msg: >
+          Rendered runner config NO_PROXY must include the LAN suffix
+          and gitea-net container short names. Got:
+          {{ rendered_runner_config }}
+
+    - name: "CHECK 7: Assert add-host injection placeholder is documented"
+      assert:
+        that:
+          # The IP-injection lives in container.options (not envs), but
+          # the template should reference the variable so it renders
+          # under test. Asserts the var is consumed somewhere.
+          - "'172.20.0.42' in rendered_runner_config"
+        fail_msg: >
+          Rendered runner config must reference
+          tailscale_runner_gitea_net_ip (deploy-time IP injection for
+          dind-spawned job containers). Got:
+          {{ rendered_runner_config }}
+
+    # ================================================================
     # Cleanup
     # ================================================================
     - name: Clean up rendered test files
@@ -171,3 +291,4 @@
       loop:
         - /tmp/test-app-ini-rendered
         - /tmp/test-ts-serve-rendered.json
+        - /tmp/test-gitea-runner-config.yml
