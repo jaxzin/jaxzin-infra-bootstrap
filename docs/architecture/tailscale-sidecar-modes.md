@@ -37,7 +37,7 @@ This doc captures the trade-off so future reviewers don't have to re-discover it
 **Trade-off:**
 - Consumer's outbound traffic is filtered through the sidecar's view: only what the sidecar can route is reachable.
 - LAN access depends on the Docker bridge attachment, NOT on `tailscale0`. The default route inside the namespace is the Docker bridge gateway, which routes via host → eth0 → LAN.
-- BUT: **dind-spawned child containers inherit the sidecar's namespace transitively, and dind's own auto-created bridges sit inside that namespace.** A child container's NAT chain becomes: `child → dind auto-bridge → dind gateway → sidecar namespace → bridge attachment → host → LAN`. Each hop is a NAT-translation opportunity, and the host-side iptables `FORWARD` chain has to permit the flow at every step. Synology DSM (and likely other restrictive setups) drops or fails to MASQUERADE traffic from nested-bridge subnets that aren't pre-registered with the host's firewall — and Tailscale's `tailscale0`-routed traffic bypasses that chain entirely. **Result: child containers can reach the tailnet but not the LAN.**
+- BUT: **dind-spawned child containers inherit the sidecar's namespace transitively, and dind's own auto-created bridges sit inside that namespace.** A child container's NAT chain becomes: `child → dind auto-bridge → dind gateway → sidecar namespace → bridge attachment → host → LAN`. Each hop is a NAT-translation opportunity, and the host-side iptables `FORWARD` chain has to permit the flow at every step. In our environment (Synology DSM), the LAN-bound flow drops somewhere in this multi-hop NAT chain while `tailscale0`-routed traffic — which bypasses the chain entirely — continues to work. The exact dropping link wasn't pinpointed; restrictive host firewall rules and missing MASQUERADE registrations for nested-bridge subnets are plausible culprits, but on stricter or differently-configured hosts the failure surface may differ. **Result: child containers can reach the tailnet but not the LAN.**
 
 This is exactly the failure mode that motivated this doc. See "The bug" below.
 
@@ -86,6 +86,27 @@ This is exactly the failure mode that motivated this doc. See "The bug" below.
 | Service that needs **only LAN/internet**, no tailnet | No sidecar | Sidecar adds latency for no benefit |
 | Service that needs **only tailnet**, no LAN | Either works; kernel mode is slightly faster | Kernel mode bypasses one userspace hop |
 
+### A fourth option: socket-mount instead of dind
+
+For Docker-in-Docker workloads specifically (e.g., a CI runner that spawns
+job containers), there's a fourth option worth naming: **drop dind entirely
+and bind-mount the host's `/var/run/docker.sock` into the runner**. Job
+containers then spawn directly on the host's Docker daemon — they sit on
+real Docker networks the host knows about (e.g., `gitea-net`), inherit
+embedded DNS, and avoid every problem above (the LAN-multi-hop-NAT
+problem, the dind-daemon DNS gap, the certs-volume mismatch).
+
+**Why we don't do this here:** Socket-mounting gives every job container
+root-equivalent authority over the host's Docker daemon — a job can
+spawn privileged containers, mount the host filesystem, or stop the
+runner itself. For **multi-tenant or hostile-job scenarios** this is
+unacceptable. For our **homelab single-tenant** setup where every
+workflow runs trusted IaC, the isolation trade-off is acceptable, and
+socket-mount is on the table as a future simplification.
+
+This is a deliberate trade-off, not a free improvement: name it
+explicitly when revisiting.
+
 ## The bug this prevented
 
 **Symptom:** A CI workflow's job container tried to resolve `unifi<lan-domain-suffix>` (a LAN hostname). DNS lookup timed out at 3 seconds. Same container could reach `100.100.100.100` (Tailscale's MagicDNS) in milliseconds.
@@ -119,6 +140,6 @@ A second, related gotcha lives one layer deeper: even with userspace mode + mult
 ## References
 
 - [Tailscale userspace networking docs](https://tailscale.com/kb/1112/userspace-networking)
-- Diagnostic PR that surfaced this: [PR #24](https://gitea.forest-draconis.ts.net/jaxzin/jaxzin-infra-bootstrap/pulls/24) (forest-draconis Gitea instance)
+- Diagnostic PR that surfaced this: PR #24 on the self-hosted Gitea instance (`https://gitea.<tailnet>/jaxzin/jaxzin-infra-bootstrap/pulls/24`)
 - The 4 hotfix PRs (`#20`–`#23`) that chased CI symptoms before this root cause was identified
 - Brian's `fix/gitea-runner-job-container-docker-access` (PR #79) and `fix/gitea-runner-cert-bind-mount` (PR #80) — runner config fixes that are independent of this sidecar topology fix
