@@ -7,6 +7,8 @@ Checks:
   C) standalone container tasks should have networks defined (warning)
   D) Gitea Tailscale sidecar tailscale_host_ports must include loopback HTTP
      AND LAN SSH bindings
+  E) gitea-runner task must NOT use network_mode: container:* (regression
+     lock-in — see docs/architecture/tailscale-sidecar-modes.md)
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -62,8 +64,16 @@ def is_docker_container_task(block):
 
 
 def has_container_network_mode(block):
-    """Check if task block has network_mode: container:*"""
+    """Check if task block has network_mode: container:*
+
+    Skips YAML comment lines (those starting with '#' after lstrip) so that
+    historical-reference comments like `# Was: network_mode: "container:..."`
+    don't trip the check. Only the live parameter should match.
+    """
     for line in block:
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
         if re.search(r'network_mode:\s*["\']?container:', line):
             return True
     return False
@@ -170,6 +180,50 @@ def check_d_gitea_sidecar_host_ports():
     return failures
 
 
+RUNNER_FORBIDDEN_NETWORK_MODE_REASON = (
+    "The gitea-runner task must NOT use `network_mode: container:*`. Sharing the "
+    "Tailscale sidecar's namespace collapses egress to the sidecar's view; "
+    "dind-spawned job containers then can reach the tailnet but not the LAN "
+    "(see docs/architecture/tailscale-sidecar-modes.md). The runner sits on "
+    "gitea-net and reaches the tailnet via the sidecar's userspace HTTP/SOCKS5 "
+    "proxy instead."
+)
+
+
+def check_e_runner_no_container_network_mode(errors):
+    """Check E: gitea-runner role tasks must not use network_mode: container:*.
+
+    Regression lock-in: if anyone re-introduces the namespace-share, this fails
+    at static-check time before it ships.
+    """
+    filepath = f"{ROLES_DIR}/gitea_runner/tasks/main.yml"
+    try:
+        with open(filepath) as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        errors.append(f"{filepath}: File not found")
+        return
+
+    blocks = split_into_task_blocks(lines)
+    for block in blocks:
+        if not is_docker_container_task(block):
+            continue
+        # Only inspect tasks that target the gitea-runner container
+        if not any(re.search(r'name:\s*["\']?gitea-runner["\']?\s*$', ln) for ln in block):
+            continue
+        if has_container_network_mode(block):
+            task_name = ""
+            for line in block:
+                m = re.search(r'-\s*name:\s*(.+)', line)
+                if m:
+                    task_name = m.group(1).strip()
+                    break
+            errors.append(
+                f"{filepath}: Task '{task_name}' uses forbidden network_mode: "
+                f"container:* on gitea-runner. {RUNNER_FORBIDDEN_NETWORK_MODE_REASON}"
+            )
+
+
 def check_tailscale_sidecar(errors):
     """Check B: tailscale_sidecar must have TS_ACCEPT_DNS in env."""
     filepath = f"{ROLES_DIR}/tailscale_sidecar/tasks/main.yml"
@@ -216,6 +270,9 @@ def main():
 
     # Run check D on the Gitea deploy playbook
     errors.extend(check_d_gitea_sidecar_host_ports())
+
+    # Run check E: gitea-runner must not regress to network_mode: container:*
+    check_e_runner_no_container_network_mode(errors)
 
     # Report results
     for w in warnings:
