@@ -57,8 +57,11 @@ jobs:
       - name: Configure LAN DNS resolution inside container
         env:
           LAN_DNS: ${{ secrets.LAN_DNS }}
+        # The runner container's default shell is `sh`/`dash`, not bash —
+        # `set -o pipefail` is bash-only and would fail "Illegal option".
+        # The script has no pipes, so `set -eu` (POSIX) is sufficient.
         run: |
-          set -euo pipefail
+          set -eu
           printf 'nameserver %s\nnameserver %s\n' "$LAN_DNS" 100.100.100.100 > /etc/resolv.conf
           echo "Configured /etc/resolv.conf:"
           cat /etc/resolv.conf
