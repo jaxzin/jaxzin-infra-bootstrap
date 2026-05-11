@@ -83,3 +83,15 @@ fabric.properties
 # Github Actions Secrets for testing (with `act`)
 .secrets
 .vars
+
+# OpenTofu local state and any non-fixture tfvars
+tofu/**/*.tfstate
+tofu/**/*.tfstate.backup
+tofu/**/.terraform/
+tofu/**/*.tfvars
+!tofu/**/tests/fixtures.tfvars
+# .terraform.lock.hcl is intentionally tracked: pinning provider hashes
+# protects drift detection from upstream provider-version drift, prevents
+# plan-vs-apply split-brain, and gives the lockfile delta a PR review path
+# for supply-chain integrity. Single-platform CI (self-hosted linux) avoids
+# the multi-platform lock juggling that motivates ignoring it elsewhere.
