@@ -37,3 +37,93 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         with:
           args: ":white_check_mark: The daily infrastructure health check passed."
+
+  # Daily drift detection for the tofu/network root module (UniFi static DNS).
+  # Exit code 0 = no drift (silent). Exit 2 = drift detected. Exit 1 = error.
+  # Notifications never include the drift diff itself - they only point the
+  # operator at the workflow run, where private details can be reviewed.
+  # Job ID is `tofu-network-drift` (not the bare `network-drift`) to anchor
+  # the drift-class unambiguously to the IaC source — distinguishes it from
+  # any future Tailscale/route/VLAN drift checks that might land here.
+  tofu-network-drift:
+    name: tofu/network drift check
+    runs-on: [self-hosted, linux]
+    container:
+      image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
+      options: --dns ${{ secrets.LAN_DNS }} --dns 100.100.100.100
+    env:
+      TF_VAR_unifi_api_url:    ${{ secrets.UNIFI_API_URL }}
+      TF_VAR_unifi_username:   ${{ secrets.UNIFI_USERNAME }}
+      TF_VAR_unifi_password:   ${{ secrets.UNIFI_PASSWORD }}
+      TF_VAR_unifi_site:       ${{ secrets.UNIFI_SITE }}
+      TF_VAR_unifi_static_dns: |
+        [
+          {
+            "name":  "${{ secrets.GITEA_LAN_FQDN || secrets.MYGITEA_LAN_FQDN }}",
+            "value": "${{ secrets.GITEA_LAN_HOST || secrets.MYGITEA_LAN_HOST }}",
+            "type":  "A"
+          }
+        ]
+      AWS_ACCESS_KEY_ID:     ${{ secrets.B2_APPLICATION_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+      B2_S3_ENDPOINT:        ${{ secrets.B2_S3_ENDPOINT }}
+      B2_REGION:             ${{ secrets.B2_REGION }}
+      TOFU_STATE_BUCKET:     ${{ secrets.TOFU_STATE_BUCKET }}
+      TOFU_STATE_KEY:        ${{ secrets.TOFU_STATE_KEY }}
+    defaults:
+      run:
+        working-directory: tofu/network
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.10.0"
+
+      - name: tofu init
+        run: |
+          tofu init \
+            -backend-config="endpoint=${B2_S3_ENDPOINT}" \
+            -backend-config="bucket=${TOFU_STATE_BUCKET}" \
+            -backend-config="key=${TOFU_STATE_KEY}" \
+            -backend-config="region=${B2_REGION}" \
+            -backend-config="skip_credentials_validation=true" \
+            -backend-config="skip_metadata_api_check=true" \
+            -backend-config="skip_region_validation=true" \
+            -backend-config="skip_requesting_account_id=true" \
+            -backend-config="use_lockfile=false" \
+            -backend-config="force_path_style=true"
+
+      - name: plan with detailed exit code
+        id: plan
+        # Capture the exit code without failing the step so the notify
+        # branches below can fan out on its value.
+        run: |
+          set +e
+          tofu plan -input=false -detailed-exitcode
+          ec=$?
+          set -e
+          echo "exitcode=${ec}" >> "$GITHUB_OUTPUT"
+          # Re-emit semantic outcome for the GitHub UI without leaking the diff.
+          case "${ec}" in
+            0) echo "no drift" ;;
+            2) echo "drift detected" ;;
+            *) echo "plan errored (exit ${ec})" ;;
+          esac
+
+      - name: Notify Discord on drift
+        if: steps.plan.outputs.exitcode == '2'
+        uses: Ilshidur/action-discord@0.3.2
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        with:
+          args: ":warning: tofu/network drift detected. Investigate the workflow run for details."
+
+      - name: Notify Discord on plan error
+        if: steps.plan.outputs.exitcode != '0' && steps.plan.outputs.exitcode != '2'
+        uses: Ilshidur/action-discord@0.3.2
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        with:
+          args: ":octagonal_sign: tofu/network drift check errored. Investigate the workflow run for details."
