@@ -107,6 +107,39 @@
         tailscale_userspace_networking: true
       when: not in_gitea
 
+    # Capture the runner sidecar's gitea-net IP so we can inject it as an
+    # /etc/hosts entry into every job container the embedded dind dockerd
+    # spawns inside gitea-runner. The dind dockerd creates its own internal
+    # bridge networks for job containers; those networks don't share
+    # gitea-net's embedded DNS, so "tailscale-runner" is unresolvable from
+    # inside a job container. Workflows that hit the userspace HTTP/SOCKS5
+    # proxy (http://tailscale-runner:1099, socks5://tailscale-runner:1055)
+    # would fail to even resolve the hostname.
+    #
+    # Quick fix: read the sidecar's bridge IP at deploy time and bake it into
+    # `container.options` (--add-host) in the runner config. Brittle if the
+    # sidecar restarts and Docker hands it a different IP from its DHCP pool;
+    # re-running this playbook re-captures the IP and reconciles. Acceptable
+    # for the current single-runner scale.
+    #
+    # Permanent fix (future): drop dind entirely and mount the host
+    # /var/run/docker.sock into the runner instead. Job containers would
+    # then live on gitea-net directly and inherit its embedded DNS. That
+    # breaks the runner's isolation guarantees, so it's a deliberate
+    # trade-off, not a free improvement. See
+    # docs/architecture/tailscale-sidecar-modes.md.
+    - name: Inspect Tailscale runner sidecar for gitea-net IP
+      community.docker.docker_container_info:
+        name: "{{ tailscale_runner_container_name }}"
+      register: tailscale_runner_container_info
+      when: not in_gitea
+
+    - name: Set tailscale-runner gitea-net IP fact
+      set_fact:
+        tailscale_runner_gitea_net_ip: >-
+          {{ tailscale_runner_container_info.container.NetworkSettings.Networks[gitea_network_name].IPAddress }}
+      when: not in_gitea
+
     # only install the Gitea runner if bootstrapping the server from GitHub
     - name: Include gitea_runner role
       include_role:

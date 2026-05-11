@@ -108,6 +108,14 @@ This is exactly the failure mode that motivated this doc. See "The bug" below.
 
 The rule of thumb: **if a container ever needs to talk to both the tailnet AND the LAN (or even the public internet via a non-tailscale path), don't share its namespace with a kernel-mode Tailscale sidecar.**
 
+### Follow-up: the dind-daemon DNS gap
+
+A second, related gotcha lives one layer deeper: even with userspace mode + multi-network, **dind-spawned job containers don't see the parent Docker network's embedded DNS.** The embedded dind dockerd inside `gitea-runner` creates its own internal bridge network for job containers; that network has its own embedded resolver, which knows nothing about peer containers on the outer `gitea-net`. So even though `gitea-runner` itself can resolve `tailscale-runner` via gitea-net's DNS, job containers it spawns cannot. Workflows that try to hit the userspace proxy (`http://tailscale-runner:1099` / `socks5://tailscale-runner:1055`) fail at DNS resolution.
+
+**Quick fix (current implementation):** Capture the sidecar's `gitea-net` IP at deploy time (via `community.docker.docker_container_info`) and inject `--add-host=tailscale-runner:<IP>` into the act_runner's `container.options`, which is applied to every job container. Brittle if the sidecar restarts and Docker hands it a new IP from its DHCP pool — re-running the playbook re-captures and reconciles. Acceptable for the current single-runner scale.
+
+**Permanent fix (future):** Drop dind entirely and mount the host's `/var/run/docker.sock` into the runner. Job containers would then live on `gitea-net` directly and inherit its embedded DNS, eliminating the gap. The trade-off is isolation: socket-mount gives job containers the same Docker authority as the host. For homelab single-tenant CI that's acceptable; for multi-tenant or hostile-job scenarios it isn't. See the "Which to use, when" table for the broader socket-mount discussion.
+
 ## References
 
 - [Tailscale userspace networking docs](https://tailscale.com/kb/1112/userspace-networking)
