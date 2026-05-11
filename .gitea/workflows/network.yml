@@ -1,0 +1,112 @@
+# .gitea/workflows/network.yml
+name: Network IaC
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tofu/network/**"
+      - ".gitea/workflows/network.yml"
+  pull_request:
+    paths:
+      - "tofu/network/**"
+      - ".gitea/workflows/network.yml"
+
+jobs:
+  network:
+    runs-on: [self-hosted, linux]
+    env:
+      # OpenTofu reads TF_VAR_* into module variables.
+      TF_VAR_unifi_api_url:    ${{ secrets.UNIFI_API_URL }}
+      TF_VAR_unifi_username:   ${{ secrets.UNIFI_USERNAME }}
+      TF_VAR_unifi_password:   ${{ secrets.UNIFI_PASSWORD }}
+      TF_VAR_unifi_site:       ${{ secrets.UNIFI_SITE }}
+      # The DNS list is built inline from individual Secrets so this repo's
+      # records stay parameterized via the same env-var pattern as everything
+      # else. Add to TF_VAR_unifi_static_dns if more records land in this repo.
+      TF_VAR_unifi_static_dns: |
+        [
+          {
+            "name":  "${{ secrets.GITEA_LAN_FQDN || secrets.MYGITEA_LAN_FQDN }}",
+            "value": "${{ secrets.GITEA_LAN_HOST || secrets.MYGITEA_LAN_HOST }}",
+            "type":  "A"
+          }
+        ]
+      # S3-compat backend creds (B2)
+      AWS_ACCESS_KEY_ID:     ${{ secrets.B2_APPLICATION_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+      # Backend config values
+      B2_S3_ENDPOINT:        ${{ secrets.B2_S3_ENDPOINT }}
+      B2_REGION:             ${{ secrets.B2_REGION }}
+      TOFU_STATE_BUCKET:     ${{ secrets.TOFU_STATE_BUCKET }}
+      TOFU_STATE_KEY:        ${{ secrets.TOFU_STATE_KEY }}
+      # For dig verification step
+      LAN_DNS:               ${{ secrets.LAN_DNS }}
+      GITEA_LAN_FQDN:        ${{ secrets.GITEA_LAN_FQDN || secrets.MYGITEA_LAN_FQDN }}
+      GITEA_LAN_HOST:        ${{ secrets.GITEA_LAN_HOST || secrets.MYGITEA_LAN_HOST }}
+      # For Discord notification on failure
+      DISCORD_WEBHOOK:       ${{ secrets.DISCORD_WEBHOOK }}
+
+    defaults:
+      run:
+        working-directory: tofu/network
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.10.0"
+
+      - name: tofu fmt
+        run: tofu fmt -check -recursive
+
+      - name: tofu init
+        run: |
+          tofu init \
+            -backend-config="endpoint=${B2_S3_ENDPOINT}" \
+            -backend-config="bucket=${TOFU_STATE_BUCKET}" \
+            -backend-config="key=${TOFU_STATE_KEY}" \
+            -backend-config="region=${B2_REGION}" \
+            -backend-config="skip_credentials_validation=true" \
+            -backend-config="skip_metadata_api_check=true" \
+            -backend-config="skip_region_validation=true" \
+            -backend-config="skip_requesting_account_id=true" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="force_path_style=true"
+
+      - name: tofu validate
+        run: tofu validate
+
+      - name: tofu plan
+        run: tofu plan -out=plan.out -input=false
+
+      - name: Plan summary (counts only — never the diff body)
+        run: |
+          tofu show -json plan.out > plan.json
+          add=$(jq '[.resource_changes[] | select(.change.actions | index("create"))] | length' plan.json)
+          chg=$(jq '[.resource_changes[] | select(.change.actions | index("update"))] | length' plan.json)
+          del=$(jq '[.resource_changes[] | select(.change.actions | index("delete"))] | length' plan.json)
+          echo "Plan: ${add} to add, ${chg} to change, ${del} to destroy."
+
+      - name: tofu apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: tofu apply -input=false -auto-approve plan.out
+
+      - name: Verify DNS resolution after apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          # Allow the controller a moment to propagate to dnsmasq.
+          for i in 1 2 3 4 5 6; do
+            result=$(dig +short "${GITEA_LAN_FQDN}" @"${LAN_DNS}")
+            if [ "${result}" = "${GITEA_LAN_HOST}" ]; then
+              echo "dig verification OK"
+              exit 0
+            fi
+            echo "attempt ${i}: got '${result}', expected '${GITEA_LAN_HOST}'; sleeping 5s"
+            sleep 5
+          done
+          echo "ERROR: DNS did not propagate to expected value within 30s"
+          exit 1
