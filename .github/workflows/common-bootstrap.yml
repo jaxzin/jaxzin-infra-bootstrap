@@ -6,23 +6,23 @@ on:
         description: "If true, run Ansible in --check mode"
         required: true
         type: boolean
-      lan_dns:
-        # GitHub Actions evaluates `container.options` at workflow-load time,
-        # before the `secrets` context is available. `secrets.X` is therefore
-        # rejected in container.options with "Unrecognized named-value:
-        # 'secrets'". Callers pass the LAN DNS value as an explicit input
-        # (sourcing from `secrets.LAN_DNS` on their side), and we read it
-        # here from `inputs.lan_dns` where the expression IS evaluable.
-        description: "LAN DNS server IP for the container's --dns option"
-        required: true
-        type: string
 
 jobs:
   bootstrap:
     runs-on: [self-hosted, linux]
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
-      options: --dns ${{ inputs.lan_dns }}
+      # NOTE: do NOT add `options: --dns ${{ secrets.LAN_DNS }}` here.
+      # GitHub Actions evaluates `container.options` at workflow-load time,
+      # before any of `secrets`, `inputs.<workflow_call-input>`-passed-from-
+      # secrets, or other secret-derived contexts are available. Both of
+      # those were tried (PR #16's direct `secrets.LAN_DNS`; PR #85's
+      # `inputs.lan_dns` via `with:` passed from caller `secrets.LAN_DNS`)
+      # and BOTH failed schema validation with:
+      #   "Unrecognized named-value: 'secrets'"
+      # The runtime DNS-override step below (first step of this job) does
+      # the same job from inside the running container, where `secrets`
+      # context IS available.
     env:
       CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
@@ -45,6 +45,24 @@ jobs:
       TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
       TS_TAILNET: ${{ secrets.TS_TAILNET }}
     steps:
+      # Must run BEFORE actions/checkout, which is the first network-using
+      # step. /etc/resolv.conf inside a Docker user-defined network is
+      # writable (it's an in-memory copy, not a host bind-mount), so
+      # overwriting it from a step works. Subsequent processes look up
+      # nameserver(s) here for every resolution. Includes MagicDNS as a
+      # fallback so tailnet hostnames (e.g. the Gitea origin URL used by
+      # checkout when triggered from the Gitea-side deploy.yml caller)
+      # also resolve. See docs/architecture/tailscale-sidecar-modes.md
+      # for the broader LAN-vs-tailnet DNS asymmetry context.
+      - name: Configure LAN DNS resolution inside container
+        env:
+          LAN_DNS: ${{ secrets.LAN_DNS }}
+        run: |
+          set -euo pipefail
+          printf 'nameserver %s\nnameserver %s\n' "$LAN_DNS" 100.100.100.100 > /etc/resolv.conf
+          echo "Configured /etc/resolv.conf:"
+          cat /etc/resolv.conf
+
       - name: Checkout IaC
         uses: actions/checkout@v4
 
