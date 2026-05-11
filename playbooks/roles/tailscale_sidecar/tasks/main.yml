@@ -48,6 +48,12 @@
       TS_ACCEPT_DNS: "{{ tailscale_accept_dns | default(true) | string | lower }}"
       TS_SERVE_CONFIG: "{{ '/etc/tailscale/serve.json' if (tailscale_serve_enabled | bool) else omit }}"
       TS_EXTRA_ARGS: "{{ tailscale_extra_args | default(omit, true) }}"
+      # In userspace networking mode, expose SOCKS5 (1055) and HTTP CONNECT
+      # (1099) proxies so peer containers on the same Docker network can
+      # route outbound tailnet traffic through this sidecar without sharing
+      # its network namespace. See https://tailscale.com/kb/1112/userspace-networking
+      TS_SOCKS5_SERVER: "{{ ':1055' if (tailscale_userspace_networking | default(false) | bool) else omit }}"
+      TS_OUTBOUND_HTTP_PROXY_LISTEN: "{{ ':1099' if (tailscale_userspace_networking | default(false) | bool) else omit }}"
     volumes: >-
       {{
         [tailscale_state_dir + ':/var/lib/tailscale',

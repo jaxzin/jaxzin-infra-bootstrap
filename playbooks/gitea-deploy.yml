@@ -94,6 +94,17 @@
         tailscale_state_dir: "{{ tailscale_runner_state_dir }}"
         tailscale_serve_enabled: false
         tailscale_host_ports: []
+        # The runner sidecar runs in userspace networking mode so peer
+        # containers on gitea-net (gitea-runner + its dind-spawned job
+        # containers) can route outbound tailnet traffic through the
+        # sidecar's SOCKS5/HTTP proxy without sharing its network
+        # namespace. Sharing the namespace (the old `network_mode:
+        # container:tailscale-runner` pattern) prevented job containers
+        # from reaching the LAN, because the sidecar's namespace only had
+        # tailnet interfaces. The Gitea sidecar stays in kernel mode
+        # because Tailscale Serve (HTTPS termination) requires the kernel
+        # TUN device.
+        tailscale_userspace_networking: true
       when: not in_gitea
 
     # only install the Gitea runner if bootstrapping the server from GitHub

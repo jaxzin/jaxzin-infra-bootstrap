@@ -136,9 +136,15 @@ Gitea and the Gitea Actions runner are each paired with a [Tailscale](https://ta
 
 ### How It Works
 
-Each application container shares its network namespace with a `tailscale/tailscale` sidecar container using Docker's `network_mode: container:` option. The sidecar handles Tailscale connectivity while the application runs its services as if they were local. Both sidecars are placed on the `gitea-net` Docker bridge network, which allows Gitea to reach MySQL (`gitea-db:3306`) while keeping MySQL itself off the tailnet entirely.
+The two sidecars use **different Tailscale networking modes** because their workloads have different network needs. See [docs/architecture/tailscale-sidecar-modes.md](docs/architecture/tailscale-sidecar-modes.md) for the deep dive.
 
-[Tailscale Serve](https://tailscale.com/kb/1312/serve) provides HTTPS on the tailnet for Gitea — it terminates TLS with a Tailscale-managed certificate and proxies to Gitea's HTTP port inside the shared network namespace. Gitea itself runs plain HTTP internally; all HTTPS for the tailnet is handled by Tailscale Serve.
+**Gitea sidecar (kernel-mode, namespace-shared):**
+Gitea shares its network namespace with the `tailscale-gitea` sidecar via Docker's `network_mode: container:` option. The sidecar handles Tailscale connectivity, and [Tailscale Serve](https://tailscale.com/kb/1312/serve) terminates TLS for `https://gitea.<your-tailnet>` with a Tailscale-managed certificate, proxying to Gitea's HTTP port inside the shared namespace. Gitea itself runs plain HTTP internally; all HTTPS for the tailnet is handled by Tailscale Serve. Kernel mode is required here because Tailscale Serve depends on the kernel TUN device.
+
+**Runner sidecar (userspace-mode, multi-network):**
+The `gitea-runner` sits on the same `gitea-net` Docker bridge as the `tailscale-runner` sidecar — NOT in its namespace. This gives `gitea-runner` (and the dind dockerd it embeds) full LAN access through the host's networking stack, which is essential for job containers that need to reach LAN destinations (UniFi controller, NAS DNS, etc.). The runner reaches the tailnet through the sidecar's HTTP-CONNECT/SOCKS5 proxy via `HTTPS_PROXY=http://tailscale-runner:1099` / `ALL_PROXY=socks5://tailscale-runner:1055`. The sidecar runs Tailscale in [userspace networking mode](https://tailscale.com/kb/1112/userspace-networking) to expose those proxy ports to its peers.
+
+Both sidecars sit on `gitea-net`, which keeps MySQL (`gitea-db:3306`) reachable from Gitea while staying off the tailnet entirely.
 
 ### Using This Repo as a Template
 
