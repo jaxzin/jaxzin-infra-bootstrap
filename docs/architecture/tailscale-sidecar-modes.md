@@ -88,7 +88,7 @@ This is exactly the failure mode that motivated this doc. See "The bug" below.
 
 ## The bug this prevented
 
-**Symptom:** A CI workflow's job container tried to resolve `unifi.lan.jaxzin.com` (a LAN hostname). DNS lookup timed out at 3 seconds. Same container could reach `100.100.100.100` (Tailscale's MagicDNS) in milliseconds.
+**Symptom:** A CI workflow's job container tried to resolve `unifi<lan-domain-suffix>` (a LAN hostname). DNS lookup timed out at 3 seconds. Same container could reach `100.100.100.100` (Tailscale's MagicDNS) in milliseconds.
 
 **Tracing the network state from inside the failing container:**
 

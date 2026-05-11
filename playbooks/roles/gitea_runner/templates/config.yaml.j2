@@ -11,14 +11,14 @@ runner:
   # HTTPS_PROXY/SOCKS5 route outbound tailnet traffic (e.g., the Gitea URL
   # used by actions/checkout) through the Tailscale sidecar's userspace
   # proxy. NO_PROXY exempts LAN + local destinations so they egress
-  # directly via the host. See gitea_runner role tasks/main.yml for the
-  # parallel env on the runner itself; this block propagates the same
-  # config to every job container spawned by the embedded dind dockerd.
+  # directly via the host. The values come from the shared
+  # gitea_runner_proxy_env dict (see defaults/main.yml) so this block
+  # cannot drift from the env: block on the runner container itself in
+  # tasks/main.yml.
   envs:
-    HTTPS_PROXY: "http://{{ tailscale_runner_container_name }}:1099"
-    HTTP_PROXY: "http://{{ tailscale_runner_container_name }}:1099"
-    ALL_PROXY: "socks5://{{ tailscale_runner_container_name }}:1055"
-    NO_PROXY: "localhost,127.0.0.1,docker,host.docker.internal,.lan.jaxzin.com,{{ gitea_network_name }}"
+{% for key, value in gitea_runner_proxy_env.items() %}
+    {{ key }}: "{{ value }}"
+{% endfor %}
   # Extra environment variables to run jobs from a file.
   # It will be ignored if it's empty or the file doesn't exist.
   env_file: .env

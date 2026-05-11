@@ -206,10 +206,11 @@ In GitHub (Settings → Secrets and variables → Actions → Secrets):
 | `GITEA_DB_PASSWORD`     | Gitea Database Password                                                |
 | `GITEA_LAN_HOST`        | LAN-facing host/IP for Gitea (topology). On Gitea side, store under the alias `MYGITEA_LAN_HOST` — the `GITEA_*` prefix is reserved by Gitea Actions. |
 | `GITEA_LAN_SSH_PORT`    | LAN port for Gitea SSH (defaults to `2222` if unset). On Gitea side, store under the alias `MYGITEA_LAN_SSH_PORT` — same reservation. |
+| `LAN_DOMAIN_SUFFIX`     | LAN DNS suffix used for `NO_PROXY` exemption inside the Gitea Actions runner so LAN hostnames bypass the userspace tailnet proxy (topology). Include the leading dot, e.g. `.lan.example.com`. |
 | `TS_AUTHKEY`            | Tailscale auth key (reusable, non-ephemeral)                           |
 | `TS_TAILNET`            | Tailscale tailnet domain, e.g. `your-tailnet.ts.net` (topology secret) |
 
-> Topology values (`NAS_HOST`, `NAS_SSH_USER`, `LAN_DNS`, `TS_TAILNET`, `GITEA_LAN_HOST`) are stored as Secrets — not Variables — because Actions Variables are not redacted in workflow logs and this repo is mirrored to a public GitHub presence. See issue #6.
+> Topology values (`NAS_HOST`, `NAS_SSH_USER`, `LAN_DNS`, `TS_TAILNET`, `GITEA_LAN_HOST`, `LAN_DOMAIN_SUFFIX`) are stored as Secrets — not Variables — because Actions Variables are not redacted in workflow logs and this repo is mirrored to a public GitHub presence. See issue #6.
 >
 > Gitea Actions reserves the `GITEA_*` prefix for system context variables. Repo-level Secrets in that namespace are rejected by the API. Plan #1's new Secrets (`GITEA_LAN_HOST`, `GITEA_LAN_SSH_PORT`) use the existing repo convention: store under the `MYGITEA_*` alias on Gitea, keep `GITEA_*` on GitHub, and the workflow falls back across both via `${{ secrets.GITEA_X || secrets.MYGITEA_X }}` (mirrors the existing `GITEA_ADMIN_USERNAME` / `MYGITEA_ADMIN_USERNAME` pattern).
 

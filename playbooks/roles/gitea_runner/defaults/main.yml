@@ -7,3 +7,25 @@ gitea_runner_memory_swap: "1024m"
 
 gitea_runner_config_file_parent: "{{ gitea_runner_data_path }}/conf"
 gitea_runner_config_file: "{{ gitea_runner_config_file_parent }}/config.yml"
+
+# Proxy env shared between the runner container itself (tasks/main.yml `env:`)
+# and the runner config that propagates the same env to every job container
+# (templates/config.yaml.j2 `runner.envs:`). Single source of truth so the
+# two surfaces can't drift.
+#
+# - 1099: Tailscale userspace HTTP CONNECT proxy listen port
+#   (TS_OUTBOUND_HTTP_PROXY_LISTEN); used by HTTP/HTTPS clients that honor
+#   *_PROXY env vars.
+# - 1055: Tailscale userspace SOCKS5 proxy listen port (TS_SOCKS5_SERVER);
+#   used by clients that speak SOCKS5 (e.g. tools driven by ALL_PROXY).
+#
+# NO_PROXY lists actual container short-names on gitea-net (which embedded
+# Docker DNS resolves) plus the LAN domain suffix so LAN hostnames bypass
+# the tailnet proxy and egress directly via the host's LAN interface.
+# Network names like "gitea-net" are NOT valid here — NO_PROXY matches
+# hostnames/IPs, not Docker network identifiers.
+gitea_runner_proxy_env:
+  HTTPS_PROXY: "http://{{ tailscale_runner_container_name }}:1099"
+  HTTP_PROXY:  "http://{{ tailscale_runner_container_name }}:1099"
+  ALL_PROXY:   "socks5://{{ tailscale_runner_container_name }}:1055"
+  NO_PROXY:    "localhost,127.0.0.1,docker,host.docker.internal,{{ lan_domain_suffix }},tailscale-runner,gitea-db,gitea-runner"
