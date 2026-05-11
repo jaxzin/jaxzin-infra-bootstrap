@@ -17,6 +17,7 @@ jobs:
     runs-on: [self-hosted, linux]
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
+      options: --dns ${{ secrets.LAN_DNS }}
     env:
       # OpenTofu reads TF_VAR_* into module variables.
       TF_VAR_unifi_api_url:    ${{ secrets.UNIFI_API_URL }}
