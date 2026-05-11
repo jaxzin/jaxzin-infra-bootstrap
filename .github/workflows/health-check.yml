@@ -50,7 +50,7 @@ jobs:
     runs-on: [self-hosted, linux]
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
-      options: --dns ${{ secrets.LAN_DNS }}
+      options: --dns ${{ secrets.LAN_DNS }} --dns 100.100.100.100
     env:
       TF_VAR_unifi_api_url:    ${{ secrets.UNIFI_API_URL }}
       TF_VAR_unifi_username:   ${{ secrets.UNIFI_USERNAME }}
