@@ -6,13 +6,23 @@ on:
         description: "If true, run Ansible in --check mode"
         required: true
         type: boolean
+      lan_dns:
+        # GitHub Actions evaluates `container.options` at workflow-load time,
+        # before the `secrets` context is available. `secrets.X` is therefore
+        # rejected in container.options with "Unrecognized named-value:
+        # 'secrets'". Callers pass the LAN DNS value as an explicit input
+        # (sourcing from `secrets.LAN_DNS` on their side), and we read it
+        # here from `inputs.lan_dns` where the expression IS evaluable.
+        description: "LAN DNS server IP for the container's --dns option"
+        required: true
+        type: string
 
 jobs:
   bootstrap:
     runs-on: [self-hosted, linux]
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
-      options: --dns ${{ secrets.LAN_DNS }}
+      options: --dns ${{ inputs.lan_dns }}
     env:
       CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
