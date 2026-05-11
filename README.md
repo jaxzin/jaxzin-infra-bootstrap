@@ -65,12 +65,13 @@ Makefile                        # Makefile for common tasks
 flowchart TB
     subgraph Tailnet["Tailscale Tailnet"]
         TG_TS["tailscale-gitea<br/>(TS_SERVE: HTTPS → HTTP :3000)"]
-        TR_TS["tailscale-runner<br/>(tailnet access only)"]
+        TR_TS["tailscale-runner<br/>(userspace mode, exposes :1055 SOCKS5 / :1099 HTTP CONNECT)"]
     end
     subgraph DockerNet["gitea-net (Docker Bridge)"]
         TG_TS --- |"network_mode: container"| Gitea["gitea<br/>(HTTP :3000, SSH :22)"]
         DB["gitea-db<br/>(MySQL :3306)"]
-        TR_TS --- |"network_mode: container"| Runner["gitea-runner<br/>(Act Runner)"]
+        Runner["gitea-runner<br/>(Act Runner)"] --- |"on gitea-net"| TR_TS
+        Runner -.->|"HTTPS_PROXY :1099"| TR_TS
     end
     Gitea --> |"gitea-db:3306"| DB
     Runner --> |"https://gitea.tailnet"| TG_TS
@@ -136,9 +137,15 @@ Gitea and the Gitea Actions runner are each paired with a [Tailscale](https://ta
 
 ### How It Works
 
-Each application container shares its network namespace with a `tailscale/tailscale` sidecar container using Docker's `network_mode: container:` option. The sidecar handles Tailscale connectivity while the application runs its services as if they were local. Both sidecars are placed on the `gitea-net` Docker bridge network, which allows Gitea to reach MySQL (`gitea-db:3306`) while keeping MySQL itself off the tailnet entirely.
+The two sidecars use **different Tailscale networking modes** because their workloads have different network needs. See [docs/architecture/tailscale-sidecar-modes.md](docs/architecture/tailscale-sidecar-modes.md) for the deep dive.
 
-[Tailscale Serve](https://tailscale.com/kb/1312/serve) provides HTTPS on the tailnet for Gitea — it terminates TLS with a Tailscale-managed certificate and proxies to Gitea's HTTP port inside the shared network namespace. Gitea itself runs plain HTTP internally; all HTTPS for the tailnet is handled by Tailscale Serve.
+**Gitea sidecar (kernel-mode, namespace-shared):**
+Gitea shares its network namespace with the `tailscale-gitea` sidecar via Docker's `network_mode: container:` option. The sidecar handles Tailscale connectivity, and [Tailscale Serve](https://tailscale.com/kb/1312/serve) terminates TLS for `https://gitea.<your-tailnet>` with a Tailscale-managed certificate, proxying to Gitea's HTTP port inside the shared namespace. Gitea itself runs plain HTTP internally; all HTTPS for the tailnet is handled by Tailscale Serve. Kernel mode is required here because Tailscale Serve depends on the kernel TUN device.
+
+**Runner sidecar (userspace-mode, multi-network):**
+The `gitea-runner` sits on the same `gitea-net` Docker bridge as the `tailscale-runner` sidecar — NOT in its namespace. This gives `gitea-runner` (and the dind dockerd it embeds) full LAN access through the host's networking stack, which is essential for job containers that need to reach LAN destinations (UniFi controller, NAS DNS, etc.). The runner reaches the tailnet through the sidecar's HTTP-CONNECT/SOCKS5 proxy via `HTTPS_PROXY=http://tailscale-runner:1099` / `ALL_PROXY=socks5://tailscale-runner:1055`. The sidecar runs Tailscale in [userspace networking mode](https://tailscale.com/kb/1112/userspace-networking) to expose those proxy ports to its peers.
+
+Both sidecars sit on `gitea-net`, which keeps MySQL (`gitea-db:3306`) reachable from Gitea while staying off the tailnet entirely.
 
 ### Using This Repo as a Template
 
@@ -200,10 +207,11 @@ In GitHub (Settings → Secrets and variables → Actions → Secrets):
 | `GITEA_DB_PASSWORD`     | Gitea Database Password                                                |
 | `GITEA_LAN_HOST`        | LAN-facing host/IP for Gitea (topology). On Gitea side, store under the alias `MYGITEA_LAN_HOST` — the `GITEA_*` prefix is reserved by Gitea Actions. |
 | `GITEA_LAN_SSH_PORT`    | LAN port for Gitea SSH (defaults to `2222` if unset). On Gitea side, store under the alias `MYGITEA_LAN_SSH_PORT` — same reservation. |
+| `LAN_DOMAIN_SUFFIX`     | LAN DNS suffix used for `NO_PROXY` exemption inside the Gitea Actions runner so LAN hostnames bypass the userspace tailnet proxy (topology). Include the leading dot, e.g. `.lan.example.com`. |
 | `TS_AUTHKEY`            | Tailscale auth key (reusable, non-ephemeral)                           |
 | `TS_TAILNET`            | Tailscale tailnet domain, e.g. `your-tailnet.ts.net` (topology secret) |
 
-> Topology values (`NAS_HOST`, `NAS_SSH_USER`, `LAN_DNS`, `TS_TAILNET`, `GITEA_LAN_HOST`) are stored as Secrets — not Variables — because Actions Variables are not redacted in workflow logs and this repo is mirrored to a public GitHub presence. See issue #6.
+> Topology values (`NAS_HOST`, `NAS_SSH_USER`, `LAN_DNS`, `TS_TAILNET`, `GITEA_LAN_HOST`, `LAN_DOMAIN_SUFFIX`) are stored as Secrets — not Variables — because Actions Variables are not redacted in workflow logs and this repo is mirrored to a public GitHub presence. See issue #6.
 >
 > Gitea Actions reserves the `GITEA_*` prefix for system context variables. Repo-level Secrets in that namespace are rejected by the API. Plan #1's new Secrets (`GITEA_LAN_HOST`, `GITEA_LAN_SSH_PORT`) use the existing repo convention: store under the `MYGITEA_*` alias on Gitea, keep `GITEA_*` on GitHub, and the workflow falls back across both via `${{ secrets.GITEA_X || secrets.MYGITEA_X }}` (mirrors the existing `GITEA_ADMIN_USERNAME` / `MYGITEA_ADMIN_USERNAME` pattern).
 
