@@ -21,7 +21,11 @@ FORBIDDEN_WITH_CONTAINER_MODE = ["dns_opts", "dns:", "dns_search", "networks", "
 
 GITEA_HOST_PORTS_REQUIRED = [
     re.compile(r'^["\']?127\.0\.0\.1:.*:3000["\']?$'),
-    re.compile(r'^["\']?\{\{\s*gitea_lan_host\s*\}\}:\{\{\s*gitea_lan_ssh_port\s*\}\}:22["\']?$'),
+    # Container-side port must be gitea_ssh_listen_port (= 2222 by default),
+    # NOT :22. Inside the shared netns, :22 is bound by Tailscale Serve on
+    # the tailnet IP only — LAN traffic to :22 gets RST. Gitea's actual
+    # listener is :::2222. See PR #93 / issue #92 for the full diagnosis.
+    re.compile(r'^["\']?\{\{\s*gitea_lan_host\s*\}\}:\{\{\s*gitea_lan_ssh_port\s*\}\}:\{\{\s*gitea_ssh_listen_port\s*\}\}["\']?$'),
 ]
 
 
