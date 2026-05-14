@@ -5,6 +5,18 @@
   vars_files:
     - vars/main.yml
 
+  # docker-py's default 60s API client timeout is too tight for this host's
+  # container-replace operations. The slow path is removing a container that
+  # holds `network_mode: container:<X>` against an X we just replaced: Docker
+  # serializes netns detach + bridge endpoint removal + volume releases, and
+  # on Synology's older Docker 24.x that chain regularly exceeds 60s. When
+  # it does, Ansible fails with: "Error removing container ...:
+  # UnixHTTPConnectionPool... Read timed out. (read timeout=60)". 180s gives
+  # roomy headroom without making genuinely hung calls wait indefinitely.
+  module_defaults:
+    community.docker.docker_container:
+      timeout: 180
+
   roles:
     - role: tafeen.synology.syno_pkg_install
       syno_pkg_name: "Container Manager"
