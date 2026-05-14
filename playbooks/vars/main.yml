@@ -59,7 +59,9 @@ gitea_ssh_listen_port: "2222"
 gitea_ssh_domain: "gitea.{{ tailscale_tailnet }}"
 # LAN-side SSH binding: makes Gitea SSH reachable from non-tailnet LAN clients
 # (e.g., Home Assistant addon containers). Bound on the host's LAN interface
-# at gitea_lan_host:gitea_lan_ssh_port → container's internal :22.
+# at gitea_lan_host:gitea_lan_ssh_port → container's internal :{{ gitea_ssh_listen_port }}
+# (Gitea's actual SSH listener — :22 in the shared netns is reserved for
+# Tailscale Serve's tailnet-side ingress).
 # Both values must come from CI Secrets (not Variables) because they're topology.
 # Note: gitea_lan_host is shared with Plan #2 (UniFi static DNS) — the LAN-side
 # address of Gitea is a single concept; consumers (this binding, the DNS A

@@ -88,7 +88,15 @@
         tailscale_serve_ssh_forward_port: "{{ gitea_ssh_listen_port }}"
         tailscale_host_ports:
           - "127.0.0.1:{{ gitea_port }}:3000"
-          - "{{ gitea_lan_host }}:{{ gitea_lan_ssh_port }}:22"
+          # Container-side port is Gitea's actual SSH listener
+          # (gitea_ssh_listen_port = 2222), NOT :22. Inside the shared netns,
+          # :22 is bound by Tailscale Serve on the tailnet IP only (for the
+          # tailnet-side ssh://git@gitea.<tailnet>:22/... flow). LAN traffic
+          # arriving on :22 finds no matching listener and gets RST. Gitea
+          # itself listens on :::2222 (app.ini SSH_LISTEN_PORT). Same variable
+          # as line 76's tailscale_serve_ssh_forward_port keeps both paths
+          # consistent.
+          - "{{ gitea_lan_host }}:{{ gitea_lan_ssh_port }}:{{ gitea_ssh_listen_port }}"
 
     - name: Include gitea_server role
       include_role:
