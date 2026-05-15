@@ -29,6 +29,23 @@ State is stored in Backblaze B2 via the S3-compat backend; locking uses S3 condi
 | `unifi_insecure` | bool | no (default `false`) | Skip TLS verification |
 | `unifi_static_dns` | list(object) | no (default `[]`) | Records to manage |
 
+## TLS to the controller
+
+`unifi_insecure` is currently set to `true` in this repo's workflows
+(`network.yml`, and the `tofu-network-drift` job in `health-check.yml`).
+
+**Why:** the UCG-Max serves a self-signed cert whose SANs are
+`unifi.local, localhost, [::1]`, which do not match the FQDN the provider
+connects via, so TLS verification fails (`x509: certificate is valid for
+unifi.local, ... not <fqdn>`). The connection is LAN-only and uses a
+dedicated CI user, so skipping verification is an acceptable interim
+posture — **but it is interim, not the intended end state.**
+
+Do not "tighten" this back to `false` without first installing a
+trusted cert on the gateway, or CI will break again with the x509 error.
+The long-term fix (publicly-trusted cert on the UCG-Max via the existing
+certbot + DNSimple DNS-01 automation) is tracked in **issue #95**.
+
 ## One-time operator setup (this repo)
 
 These steps cannot be code (they bootstrap the credentials code uses).

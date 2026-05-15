@@ -30,6 +30,13 @@ jobs:
       TF_VAR_unifi_username:   ${{ secrets.UNIFI_USERNAME }}
       TF_VAR_unifi_password:   ${{ secrets.UNIFI_PASSWORD }}
       TF_VAR_unifi_site:       ${{ secrets.UNIFI_SITE }}
+      # INTERIM (see issue #95): the UCG-Max serves a self-signed cert whose
+      # SANs (unifi.local, localhost, [::1]) don't match the FQDN we connect
+      # via, so TLS verification fails. Skipping verification is acceptable
+      # here — LAN-only connection, dedicated CI user. The long-term fix is a
+      # publicly-trusted cert on the gateway via the existing certbot/DNSimple
+      # DNS-01 automation; tracked in #95. Remove this once that lands.
+      TF_VAR_unifi_insecure:   "true"
       # The DNS list is built inline from individual Secrets so this repo's
       # records stay parameterized via the same env-var pattern as everything
       # else. Add to TF_VAR_unifi_static_dns if more records land in this repo.
