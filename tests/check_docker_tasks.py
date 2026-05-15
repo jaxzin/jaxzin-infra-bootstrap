@@ -9,6 +9,8 @@ Checks:
      AND LAN SSH bindings
   E) gitea-runner task must NOT use network_mode: container:* (regression
      lock-in — see docs/architecture/tailscale-sidecar-modes.md)
+  F) runner image Dockerfile must install a dig-providing apt package
+     (network.yml's post-apply DNS verify step needs `dig` — see issue #96)
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -18,6 +20,12 @@ import sys
 
 ROLES_DIR = "playbooks/roles"
 FORBIDDEN_WITH_CONTAINER_MODE = ["dns_opts", "dns:", "dns_search", "networks", "ports"]
+
+DOCKERFILE_PATH = "Dockerfile"
+# Either name provides `dig`. `dnsutils` is conventional and still valid on
+# Ubuntu 24.04 (transitional package -> bind9-dnsutils); accept both so the
+# lock-in does not break if a maintainer switches to the canonical name.
+DIG_PACKAGES = ("dnsutils", "bind9-dnsutils")
 
 GITEA_HOST_PORTS_REQUIRED = [
     re.compile(r'^["\']?127\.0\.0\.1:.*:3000["\']?$'),
@@ -255,6 +263,45 @@ def check_tailscale_sidecar(errors):
         errors.append(f"{filepath}: No docker_container task found in tailscale_sidecar role")
 
 
+def check_f_dockerfile_dns_tools(errors):
+    """Check F: the runner image must install a `dig`-providing apt package.
+
+    network.yml's "Verify DNS resolution after apply" step shells out to
+    `dig`. The base image does not ship it, so that step fails with exit
+    127 once the workflow reaches it. Lock the dependency in here so a
+    future Dockerfile edit cannot silently drop it (see issue #96).
+    """
+    try:
+        with open(DOCKERFILE_PATH) as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        errors.append(f"{DOCKERFILE_PATH}: File not found")
+        return
+
+    # Collapse `\`-newline continuations so a multi-line RUN is one logical
+    # line, then pull the argument list of each `apt-get install` command
+    # (up to the next `&&` or newline). Scoping to the install command means
+    # a package name elsewhere (an ENV value, a comment) cannot false-pass.
+    joined = text.replace("\\\n", " ")
+    install_args = " ".join(re.findall(r"apt-get install\b([^&\n]*)", joined))
+    if not install_args.strip():
+        errors.append(
+            f"{DOCKERFILE_PATH}: expected an `apt-get install` layer; none found"
+        )
+        return
+
+    # Exact whitespace-delimited token match so `dnsutils` is its own apt
+    # argument, not a substring of e.g. `dnsutils-dev`.
+    installed = set(install_args.split())
+    if not any(pkg in installed for pkg in DIG_PACKAGES):
+        errors.append(
+            f"{DOCKERFILE_PATH}: no dig-providing apt package installed "
+            f"(expected one of: {', '.join(DIG_PACKAGES)}); the network.yml "
+            f"'Verify DNS resolution after apply' step needs `dig`. "
+            f"See issue #96."
+        )
+
+
 def main():
     errors = []
     warnings = []
@@ -277,6 +324,9 @@ def main():
 
     # Run check E: gitea-runner must not regress to network_mode: container:*
     check_e_runner_no_container_network_mode(errors)
+
+    # Run check F: runner image must ship a dig-providing package (#96)
+    check_f_dockerfile_dns_tools(errors)
 
     # Report results
     for w in warnings:
