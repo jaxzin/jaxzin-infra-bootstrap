@@ -275,19 +275,28 @@ def check_f_dockerfile_dns_tools(errors):
         with open(DOCKERFILE_PATH) as fh:
             text = fh.read()
     except FileNotFoundError:
-        errors.append(f"{DOCKERFILE_PATH}: file not found")
+        errors.append(f"{DOCKERFILE_PATH}: File not found")
         return
 
-    if "apt-get install" not in text:
+    # Collapse `\`-newline continuations so a multi-line RUN is one logical
+    # line, then pull the argument list of each `apt-get install` command
+    # (up to the next `&&` or newline). Scoping to the install command means
+    # a package name elsewhere (an ENV value, a comment) cannot false-pass.
+    joined = text.replace("\\\n", " ")
+    install_args = " ".join(re.findall(r"apt-get install\b([^&\n]*)", joined))
+    if not install_args.strip():
         errors.append(
             f"{DOCKERFILE_PATH}: expected an `apt-get install` layer; none found"
         )
         return
 
-    if not any(re.search(rf"\b{re.escape(pkg)}\b", text) for pkg in DIG_PACKAGES):
+    # Exact whitespace-delimited token match so `dnsutils` is its own apt
+    # argument, not a substring of e.g. `dnsutils-dev`.
+    installed = set(install_args.split())
+    if not any(pkg in installed for pkg in DIG_PACKAGES):
         errors.append(
             f"{DOCKERFILE_PATH}: no dig-providing apt package installed "
-            f"(expected one of {DIG_PACKAGES}); the network.yml "
+            f"(expected one of: {', '.join(DIG_PACKAGES)}); the network.yml "
             f"'Verify DNS resolution after apply' step needs `dig`. "
             f"See issue #96."
         )
