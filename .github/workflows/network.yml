@@ -17,13 +17,26 @@ jobs:
     runs-on: [self-hosted, linux]
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
-      options: --dns ${{ secrets.LAN_DNS }} --dns 100.100.100.100
+      # NOTE: do NOT add `options: --dns ${{ secrets.LAN_DNS }}` here.
+      # GitHub Actions evaluates `container.options` at workflow-load time,
+      # before the `secrets` context is available, so it fails schema
+      # validation with "Unrecognized named-value: 'secrets'". The runtime
+      # DNS-override step below (first step of this job) does the same job
+      # from inside the running container, where `secrets` IS available.
+      # PR #86 applied this identical fix to common-bootstrap.yml.
     env:
       # OpenTofu reads TF_VAR_* into module variables.
       TF_VAR_unifi_api_url:    ${{ secrets.UNIFI_API_URL }}
       TF_VAR_unifi_username:   ${{ secrets.UNIFI_USERNAME }}
       TF_VAR_unifi_password:   ${{ secrets.UNIFI_PASSWORD }}
       TF_VAR_unifi_site:       ${{ secrets.UNIFI_SITE }}
+      # INTERIM (see issue #95): the UCG-Max serves a self-signed cert whose
+      # SANs (unifi.local, localhost, [::1]) don't match the FQDN we connect
+      # via, so TLS verification fails. Skipping verification is acceptable
+      # here — LAN-only connection, dedicated CI user. The long-term fix is a
+      # publicly-trusted cert on the gateway via the existing certbot/DNSimple
+      # DNS-01 automation; tracked in #95. Remove this once that lands.
+      TF_VAR_unifi_insecure:   "true"
       # The DNS list is built inline from individual Secrets so this repo's
       # records stay parameterized via the same env-var pattern as everything
       # else. Add to TF_VAR_unifi_static_dns if more records land in this repo.
@@ -55,6 +68,29 @@ jobs:
         working-directory: tofu/network
 
     steps:
+      # Must run BEFORE actions/checkout (the first network-using step).
+      # /etc/resolv.conf inside a Docker user-defined network is an in-memory
+      # copy, not a host bind-mount, so overwriting it from a step works.
+      # 100.100.100.100 (MagicDNS) is a fallback so tailnet hostnames still
+      # resolve. See PR #86 / common-bootstrap.yml for the origin of this
+      # pattern and docs/architecture/tailscale-sidecar-modes.md for the
+      # LAN-vs-tailnet DNS asymmetry context.
+      - name: Configure LAN DNS resolution inside container
+        # This job sets defaults.run.working-directory: tofu/network, which
+        # does not exist until checkout. Override to / so this pre-checkout
+        # step has a valid cwd; it only writes the absolute path
+        # /etc/resolv.conf, so the directory is otherwise irrelevant.
+        working-directory: /
+        env:
+          LAN_DNS: ${{ secrets.LAN_DNS }}
+        # Container default shell is sh/dash, not bash — no `set -o pipefail`
+        # (bash-only, "Illegal option"). No pipes here, so `set -eu` suffices.
+        run: |
+          set -eu
+          printf 'nameserver %s\nnameserver %s\n' "$LAN_DNS" 100.100.100.100 > /etc/resolv.conf
+          echo "Configured /etc/resolv.conf:"
+          cat /etc/resolv.conf
+
       - name: Checkout
         uses: actions/checkout@v4
 
