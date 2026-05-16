@@ -108,11 +108,17 @@
     - Restart Gitea runner
 
 - name: Template the tailnet ssh ProxyCommand config for job containers
+  # owner/group MUST be root: bind-mounted into job containers at
+  # /etc/ssh/ssh_config.d/10-tailnet-proxy.conf, OpenSSH strict-checks
+  # Included global config and requires st_uid==0 (or the running user).
+  # A host-uid-owned file → "Bad owner or permissions" → ssh discards the
+  # whole config → ProxyCommand never applies (Gitea #25). The playbook
+  # runs become: true, so chown to root succeeds.
   template:
     src: tailnet-ssh-proxy.conf.j2
     dest: "{{ gitea_runner_tailnet_ssh_config_host_path }}"
-    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
-    group: "users"
+    owner: root
+    group: root
     mode: '0644'
   notify:
     - Restart Gitea runner
