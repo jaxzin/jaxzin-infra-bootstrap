@@ -34,6 +34,12 @@ jobs:
       GITEA_LAN_HOST: ${{ secrets.GITEA_LAN_HOST || secrets.MYGITEA_LAN_HOST }}
       GITEA_LAN_SSH_PORT: ${{ secrets.GITEA_LAN_SSH_PORT || secrets.MYGITEA_LAN_SSH_PORT }}
       LAN_DOMAIN_SUFFIX: ${{ secrets.LAN_DOMAIN_SUFFIX }}
+      # Non-secret (public ERNW release URL + its sha256) → Variables, not
+      # Secrets. Consumed by the gitea_runner role to fetch the static
+      # socat that gives job containers an ssh->tailnet SOCKS5 path
+      # (Gitea #25; see docs/runbooks/job-container-tailnet-ssh.md).
+      GITEA_RUNNER_SOCKS_HELPER_URL: ${{ vars.GITEA_RUNNER_SOCKS_HELPER_URL }}
+      GITEA_RUNNER_SOCKS_HELPER_SHA256: ${{ vars.GITEA_RUNNER_SOCKS_HELPER_SHA256 }}
       GITEA_RESTORE: ${{ inputs.recover }}
       B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
       B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
