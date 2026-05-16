@@ -225,6 +225,10 @@
         # host paths so the template renders without the real defaults.
         gitea_runner_socks_helper_host_path: "/tmp/test/conf/ts-socks5"
         gitea_runner_tailnet_ssh_config_host_path: "/tmp/test/conf/10-tailnet-proxy.conf"
+        # config.yaml.j2 mounts use the in-dind path (resolved in the
+        # gitea-runner container), not the host path. See defaults/main.yml.
+        gitea_runner_socks_helper_indind_path: "/data/conf/ts-socks5"
+        gitea_runner_tailnet_ssh_config_indind_path: "/data/conf/10-tailnet-proxy.conf"
         gitea_runner_proxy_env:
           HTTPS_PROXY: "http://tailscale-runner:1099"
           HTTP_PROXY: "http://tailscale-runner:1099"

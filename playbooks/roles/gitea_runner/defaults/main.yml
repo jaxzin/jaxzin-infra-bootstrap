@@ -61,3 +61,13 @@ gitea_runner_socks_helper_url: "{{ lookup('ansible.builtin.env', 'GITEA_RUNNER_S
 gitea_runner_socks_helper_sha256: "{{ lookup('ansible.builtin.env', 'GITEA_RUNNER_SOCKS_HELPER_SHA256') | default('', true) }}"
 gitea_runner_socks_helper_host_path: "{{ gitea_runner_config_file_parent }}/ts-socks5"
 gitea_runner_tailnet_ssh_config_host_path: "{{ gitea_runner_config_file_parent }}/10-tailnet-proxy.conf"
+# The *_host_path values above are NAS-host paths — correct for the
+# Ansible get_url/template tasks that create the files. But the
+# config.yaml.j2 container.options `-v` SOURCE is resolved by the inner
+# dind dockerd, whose filesystem IS the gitea-runner container, where the
+# conf dir is the host's gitea_runner_data_path mounted at /data (proven
+# by CONFIG_FILE=/data/conf/config.yml and the /certs/client precedent).
+# So the job-container mount source must be the in-runner path, NOT the
+# host path. Using the host path makes dind auto-create an empty dir.
+gitea_runner_socks_helper_indind_path: "/data/conf/ts-socks5"
+gitea_runner_tailnet_ssh_config_indind_path: "/data/conf/10-tailnet-proxy.conf"
