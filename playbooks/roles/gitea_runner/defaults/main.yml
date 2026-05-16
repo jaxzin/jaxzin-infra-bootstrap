@@ -40,3 +40,24 @@ gitea_runner_proxy_env:
   HTTP_PROXY:  "http://{{ tailscale_runner_container_name }}:1099"
   ALL_PROXY:   "socks5://{{ tailscale_runner_container_name }}:1055"
   NO_PROXY:    "localhost,127.0.0.1,docker,host.docker.internal,{{ lan_domain_suffix }},tailscale-runner,gitea-db,gitea-runner"
+
+# --- Tailnet ssh path for dind job containers (Gitea #25) ---
+# `ssh` does NOT honor *_PROXY, so the proxy env above does not help jobs
+# that ssh to tailnet hosts (e.g. obsidian-mcp deploying to gaming.<tailnet>).
+# Post-userspace-refactor the job container has no tailnet route AND no
+# MagicDNS — gaming.<tailnet> resolves to public junk. Fix: give ssh a
+# ProxyCommand through the sidecar's SOCKS5 server, which (being on the
+# tailnet) does the MagicDNS resolution AND the routing. The upstream job
+# image (docker.gitea.com/runner-images:ubuntu-latest) ships no SOCKS
+# client, so we bind-mount a static `socat` + an ssh_config.d snippet into
+# every job container via config.yaml.j2 container.options.
+#
+# socat is fetched (pinned URL + sha256) rather than vendored as a binary
+# in git. Both MUST be set by the operator to a trusted static build (it
+# runs inside every CI job container) — see
+# docs/runbooks/job-container-tailnet-ssh.md. No default URL on purpose:
+# guessing a binary download is a supply-chain risk.
+gitea_runner_socks_helper_url: "{{ lookup('ansible.builtin.env', 'GITEA_RUNNER_SOCKS_HELPER_URL') | default('', true) }}"
+gitea_runner_socks_helper_sha256: "{{ lookup('ansible.builtin.env', 'GITEA_RUNNER_SOCKS_HELPER_SHA256') | default('', true) }}"
+gitea_runner_socks_helper_host_path: "{{ gitea_runner_config_file_parent }}/ts-socks5"
+gitea_runner_tailnet_ssh_config_host_path: "{{ gitea_runner_config_file_parent }}/10-tailnet-proxy.conf"

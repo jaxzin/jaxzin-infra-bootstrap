@@ -78,6 +78,45 @@
   notify:
     - Restart Gitea runner
 
+# --- Tailnet ssh path for dind job containers (Gitea #25) ---
+# These two host files are bind-mounted read-only into every job container
+# (see container.options in templates/config.yaml.j2). Must exist before
+# the runner container starts so the mounts resolve.
+
+- name: Require a pinned static SOCKS5 helper for the job-container tailnet ssh path
+  assert:
+    that:
+      - gitea_runner_socks_helper_url | length > 0
+      - gitea_runner_socks_helper_sha256 | length > 0
+    fail_msg: >-
+      GITEA_RUNNER_SOCKS_HELPER_URL and GITEA_RUNNER_SOCKS_HELPER_SHA256 must
+      be set to a trusted static `socat` build — it runs inside every CI job
+      container to give `ssh` a SOCKS5 path to tailnet hosts (Gitea #25). No
+      default is shipped on purpose (guessing a binary download is a
+      supply-chain risk). See docs/runbooks/job-container-tailnet-ssh.md.
+    success_msg: "Static SOCKS5 helper source is pinned (url + sha256)."
+
+- name: Fetch the pinned static SOCKS5 helper (socat) to the runner host
+  ansible.builtin.get_url:
+    url: "{{ gitea_runner_socks_helper_url }}"
+    dest: "{{ gitea_runner_socks_helper_host_path }}"
+    checksum: "sha256:{{ gitea_runner_socks_helper_sha256 }}"
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "users"
+    mode: '0755'
+  notify:
+    - Restart Gitea runner
+
+- name: Template the tailnet ssh ProxyCommand config for job containers
+  template:
+    src: tailnet-ssh-proxy.conf.j2
+    dest: "{{ gitea_runner_tailnet_ssh_config_host_path }}"
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "users"
+    mode: '0644'
+  notify:
+    - Restart Gitea runner
+
 # --- Runner container deployment (conditional on Tailscale) ---
 
 # Healthcheck used by both deploy variants below. Detects the s6 init wedge
