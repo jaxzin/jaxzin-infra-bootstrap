@@ -18,6 +18,10 @@ Checks:
      deploy variants) and pin the inner dind storage driver via a
      /etc/docker/daemon.json bind-mount (regression lock-in — see Gitea
      fallen-leaf/ansible-runner-image#15)
+  I) gitea_runner must give job containers an ssh->tailnet SOCKS5 path:
+     config.yaml.j2 container.options bind-mounts the static socat helper
+     and the ssh_config.d ProxyCommand snippet (regression lock-in — see
+     Gitea issue #25)
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -53,6 +57,22 @@ GITEA_RUNNER_TASKS = f"{ROLES_DIR}/gitea_runner/tasks/main.yml"
 # fallen-leaf/ansible-runner-image#15.
 GITEA_RUNNER_INIT_MIN = 2
 GITEA_RUNNER_DAEMON_JSON_MARKER = "/etc/docker/daemon.json"
+
+GITEA_RUNNER_CONFIG_TEMPLATE = f"{ROLES_DIR}/gitea_runner/templates/config.yaml.j2"
+GITEA_RUNNER_SSH_PROXY_TEMPLATE = f"{ROLES_DIR}/gitea_runner/templates/tailnet-ssh-proxy.conf.j2"
+# config.yaml.j2 container.options must bind-mount BOTH the static SOCKS5
+# helper and the ssh_config.d ProxyCommand snippet into job containers;
+# the snippet template must drive ssh through the sidecar's SOCKS5 server.
+# See Gitea issue #25.
+GITEA_RUNNER_SSH_PROXY_OPTION_MARKERS = (
+    ":/usr/local/bin/ts-socks5:ro",
+    ":/etc/ssh/ssh_config.d/10-tailnet-proxy.conf:ro",
+)
+GITEA_RUNNER_SSH_PROXY_TEMPLATE_MARKERS = (
+    "ProxyCommand",
+    "SOCKS5:",
+    "socksport=1055",
+)
 
 GITEA_HOST_PORTS_REQUIRED = [
     re.compile(r'^["\']?127\.0\.0\.1:.*:3000["\']?$'),
@@ -399,6 +419,53 @@ def check_h_gitea_runner_dind_hardening(errors):
         )
 
 
+def check_i_gitea_runner_job_tailnet_ssh(errors):
+    """Check I: job containers must get an ssh->tailnet SOCKS5 path.
+
+    `ssh` ignores *_PROXY and the dind job container has no tailnet
+    route/MagicDNS, so a plain `ssh host.<tailnet>` fails ENETUNREACH
+    (Gitea #25). The fix bind-mounts a static socat helper + an
+    ssh_config.d ProxyCommand snippet into every job container via
+    config.yaml.j2 container.options. Lock both surfaces in so a refactor
+    can't silently drop the #25 fix.
+    """
+    try:
+        with open(GITEA_RUNNER_CONFIG_TEMPLATE) as fh:
+            cfg = fh.read()
+    except FileNotFoundError:
+        errors.append(f"{GITEA_RUNNER_CONFIG_TEMPLATE}: File not found")
+        cfg = ""
+
+    miss_opt = [m for m in GITEA_RUNNER_SSH_PROXY_OPTION_MARKERS if m not in cfg]
+    if cfg and miss_opt:
+        errors.append(
+            f"{GITEA_RUNNER_CONFIG_TEMPLATE}: container.options missing job "
+            f"container ssh->tailnet mount(s) {miss_opt}; without the static "
+            f"SOCKS5 helper + ssh_config.d snippet, `ssh` to a tailnet host "
+            f"fails ENETUNREACH. See Gitea issue #25."
+        )
+
+    try:
+        with open(GITEA_RUNNER_SSH_PROXY_TEMPLATE) as fh:
+            tmpl = fh.read()
+    except FileNotFoundError:
+        errors.append(
+            f"{GITEA_RUNNER_SSH_PROXY_TEMPLATE}: File not found; the job "
+            f"container ssh ProxyCommand snippet is required for the Gitea "
+            f"#25 tailnet-ssh fix."
+        )
+        tmpl = ""
+
+    miss_t = [m for m in GITEA_RUNNER_SSH_PROXY_TEMPLATE_MARKERS if m not in tmpl]
+    if tmpl and miss_t:
+        errors.append(
+            f"{GITEA_RUNNER_SSH_PROXY_TEMPLATE}: missing marker(s) {miss_t}; "
+            f"the snippet must route ssh through the sidecar's SOCKS5 server "
+            f"(ProxyCommand ... SOCKS5: ... socksport=1055) so the tailnet "
+            f"side does MagicDNS + routing. See Gitea issue #25."
+        )
+
+
 def main():
     errors = []
     warnings = []
@@ -431,6 +498,9 @@ def main():
     # Run check H: gitea_runner must run docker-init PID 1 + pin dind
     # storage driver (Gitea fallen-leaf/ansible-runner-image#15)
     check_h_gitea_runner_dind_hardening(errors)
+
+    # Run check I: job containers must get an ssh->tailnet SOCKS5 path (#25)
+    check_i_gitea_runner_job_tailnet_ssh(errors)
 
     # Report results
     for w in warnings:

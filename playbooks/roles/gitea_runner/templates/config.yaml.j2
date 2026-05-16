@@ -97,7 +97,12 @@ container:
   #   playbook to reconcile. See docs/architecture/tailscale-sidecar-modes.md
   #   for the quick-vs-permanent fix trade-off.
   # See fallen-leaf/ansible-runner-image#1.
-  options: "-v /certs/client:/certs/client:ro --add-host=docker:host-gateway --add-host=tailscale-runner:{{ tailscale_runner_gitea_net_ip }} -e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client"
+  # The two ts-socks5 / ssh_config.d bind-mounts give `ssh` in job
+  # containers a SOCKS5 path to tailnet hosts via the userspace sidecar
+  # (Gitea #25). `ssh` ignores *_PROXY, and the job container has no
+  # tailnet route/MagicDNS, so without these a plain ssh to a tailnet
+  # host fails ENETUNREACH. See defaults/main.yml + the runbook.
+  options: "-v /certs/client:/certs/client:ro --add-host=docker:host-gateway --add-host=tailscale-runner:{{ tailscale_runner_gitea_net_ip }} -e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client -v {{ gitea_runner_socks_helper_host_path }}:/usr/local/bin/ts-socks5:ro -v {{ gitea_runner_tailnet_ssh_config_host_path }}:/etc/ssh/ssh_config.d/10-tailnet-proxy.conf:ro"
   # The parent directory of a job's working directory.
   # NOTE: There is no need to add the first '/' of the path as act_runner will add it automatically.
   # If the path starts with '/', the '/' will be trimmed.
