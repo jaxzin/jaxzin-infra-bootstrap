@@ -71,7 +71,7 @@
       }}
   when: tailscale_enabled | bool
 
-- name: Wait for Tailscale to connect to tailnet
+- name: Wait for Tailscale to reach Running state
   community.docker.docker_container_exec:
     container: "{{ tailscale_container_name }}"
     command: tailscale status --json
@@ -82,4 +82,50 @@
   retries: 30
   delay: 2
   changed_when: false
+  # Do NOT hard-fail on the until timeout: the assertions below turn a
+  # dead/expired TS_AUTHKEY or a "registered but not routing" sidecar into
+  # a named, actionable error instead of an opaque retry exhaustion.
+  failed_when: false
+  when: tailscale_enabled | bool and not ansible_check_mode
+
+- name: Parse final Tailscale status
+  set_fact:
+    ts_state: >-
+      {{ (ts_status.stdout | from_json)
+         if (ts_status.stdout is defined and (ts_status.stdout | length) > 0)
+         else {} }}
+  when: tailscale_enabled | bool and not ansible_check_mode
+
+- name: Fail fast with an actionable message when the auth key is expired or revoked
+  fail:
+    msg: >-
+      Tailscale sidecar '{{ tailscale_container_name }}' did not authenticate
+      (BackendState={{ ts_state.BackendState | default('unknown') }}). This is
+      the classic expired/revoked TS_AUTHKEY signature. Rotate the key in the
+      Tailscale admin console and update the TS_AUTHKEY CI secret on BOTH the
+      GitHub repo and the Gitea mirror — see
+      docs/runbooks/tailscale-authkey-rotation.md. Persistent sidecars require
+      a reusable, NON-ephemeral key.
+  when: >
+    tailscale_enabled | bool and not ansible_check_mode and
+    ts_state.BackendState | default('') in ['NeedsLogin', 'NoState', 'NeedsMachineAuth']
+
+- name: Assert the sidecar is Running AND has a usable tailnet route
+  assert:
+    that:
+      - ts_state.BackendState | default('') == 'Running'
+      - ts_state.Self.Online | default(false) | bool
+      - (ts_state.Peer | default({}) | length) > 0
+    fail_msg: >-
+      Tailscale sidecar '{{ tailscale_container_name }}' is
+      BackendState={{ ts_state.BackendState | default('unknown') }},
+      Self.Online={{ ts_state.Self.Online | default('?') }},
+      peers={{ ts_state.Peer | default({}) | length }} — registered but NOT
+      routing. Jobs proxying through this sidecar would fail with
+      ENETUNREACH. If BackendState is not Running the TS_AUTHKEY is likely
+      expired/revoked — see docs/runbooks/tailscale-authkey-rotation.md
+      (Gitea issue #25).
+    success_msg: >-
+      Tailscale sidecar '{{ tailscale_container_name }}' is Running with a
+      usable tailnet route ({{ ts_state.Peer | default({}) | length }} peers).
   when: tailscale_enabled | bool and not ansible_check_mode
