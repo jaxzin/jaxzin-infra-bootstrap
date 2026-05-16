@@ -11,6 +11,9 @@ Checks:
      lock-in — see docs/architecture/tailscale-sidecar-modes.md)
   F) runner image Dockerfile must install a dig-providing apt package
      (network.yml's post-apply DNS verify step needs `dig` — see issue #96)
+  G) tailscale_sidecar role must fail fast with an auth-aware message on an
+     expired/revoked TS_AUTHKEY and assert a usable tailnet route, not just
+     BackendState==Running (regression lock-in — see Gitea issue #25)
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -26,6 +29,18 @@ DOCKERFILE_PATH = "Dockerfile"
 # Ubuntu 24.04 (transitional package -> bind9-dnsutils); accept both so the
 # lock-in does not break if a maintainer switches to the canonical name.
 DIG_PACKAGES = ("dnsutils", "bind9-dnsutils")
+
+TAILSCALE_SIDECAR_TASKS = f"{ROLES_DIR}/tailscale_sidecar/tasks/main.yml"
+# Markers that must all be present in the sidecar role for the Gitea #25
+# fail-fast fix to be considered in place:
+#  - "NeedsLogin"  → the auth-expired/revoked BackendState is explicitly handled
+#  - "Self.Online" → readiness asserts a usable route, not just Running
+#  - the runbook path → the actionable error points operators at rotation
+AUTHKEY_FAILFAST_MARKERS = (
+    "NeedsLogin",
+    "Self.Online",
+    "docs/runbooks/tailscale-authkey-rotation.md",
+)
 
 GITEA_HOST_PORTS_REQUIRED = [
     re.compile(r'^["\']?127\.0\.0\.1:.*:3000["\']?$'),
@@ -302,6 +317,36 @@ def check_f_dockerfile_dns_tools(errors):
         )
 
 
+def check_g_tailscale_authkey_failfast(errors):
+    """Check G: the tailscale_sidecar role must fail fast on an
+    expired/revoked TS_AUTHKEY with an actionable message AND assert a
+    usable tailnet route (not just BackendState==Running).
+
+    Without this, an expired persistent TS_AUTHKEY surfaces as an opaque
+    60s Ansible `until` timeout, and a "registered but not routing"
+    sidecar ships silently — downstream consumer deploys then fail with
+    ENETUNREACH plays later. Lock the fix in so a refactor can't regress
+    it (see Gitea issue #25).
+    """
+    try:
+        with open(TAILSCALE_SIDECAR_TASKS) as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        errors.append(f"{TAILSCALE_SIDECAR_TASKS}: File not found")
+        return
+
+    missing = [m for m in AUTHKEY_FAILFAST_MARKERS if m not in text]
+    if missing:
+        errors.append(
+            f"{TAILSCALE_SIDECAR_TASKS}: missing TS_AUTHKEY fail-fast / route "
+            f"assertion marker(s) {missing}; the sidecar must detect an "
+            f"expired/revoked key (NeedsLogin) with an actionable rotation "
+            f"message and assert a usable route (Self.Online), not just "
+            f"BackendState==Running. See Gitea issue #25 and "
+            f"docs/runbooks/tailscale-authkey-rotation.md."
+        )
+
+
 def main():
     errors = []
     warnings = []
@@ -327,6 +372,9 @@ def main():
 
     # Run check F: runner image must ship a dig-providing package (#96)
     check_f_dockerfile_dns_tools(errors)
+
+    # Run check G: tailscale_sidecar must fail fast on a dead TS_AUTHKEY (#25)
+    check_g_tailscale_authkey_failfast(errors)
 
     # Report results
     for w in warnings:
