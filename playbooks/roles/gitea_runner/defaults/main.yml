@@ -8,6 +8,17 @@ gitea_runner_memory_swap: "1024m"
 gitea_runner_config_file_parent: "{{ gitea_runner_data_path }}/conf"
 gitea_runner_config_file: "{{ gitea_runner_config_file_parent }}/config.yml"
 
+# Inner dind dockerd storage driver. Pinned (not auto-detected) because on
+# the Synology DSM kernel dockerd's auto-probe fails overlay2 ("no such
+# device") then fuse-overlayfs ("not found") before falling back to btrfs;
+# every dockerd (re)start re-runs that fragile probe and a job container
+# landing mid-probe crashloops (Gitea fallen-leaf/ansible-runner-image#15).
+# btrfs is what the probe empirically settles on and what the Synology
+# volume backing the runner's /var/lib/docker supports — pin it so dockerd
+# goes straight there instead of cycling through the broken drivers.
+gitea_runner_storage_driver: "btrfs"
+gitea_runner_dind_daemon_json: "{{ gitea_runner_config_file_parent }}/daemon.json"
+
 # Proxy env shared between the runner container itself (tasks/main.yml `env:`)
 # and the runner config that propagates the same env to every job container
 # (templates/config.yaml.j2 `runner.envs:`). Single source of truth so the

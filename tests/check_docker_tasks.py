@@ -14,6 +14,10 @@ Checks:
   G) tailscale_sidecar role must fail fast with an auth-aware message on an
      expired/revoked TS_AUTHKEY and assert a usable tailnet route, not just
      BackendState==Running (regression lock-in — see Gitea issue #25)
+  H) gitea_runner role must run docker-init as PID 1 (init: true on both
+     deploy variants) and pin the inner dind storage driver via a
+     /etc/docker/daemon.json bind-mount (regression lock-in — see Gitea
+     fallen-leaf/ansible-runner-image#15)
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -41,6 +45,14 @@ AUTHKEY_FAILFAST_MARKERS = (
     "Self.Online",
     "docs/runbooks/tailscale-authkey-rotation.md",
 )
+
+GITEA_RUNNER_TASKS = f"{ROLES_DIR}/gitea_runner/tasks/main.yml"
+# Both gitea-runner deploy variants (with-Tailscale + standalone) must run
+# docker-init as PID 1 (init: true) AND pin the inner dind storage driver
+# via a bind-mounted /etc/docker/daemon.json. See Gitea
+# fallen-leaf/ansible-runner-image#15.
+GITEA_RUNNER_INIT_MIN = 2
+GITEA_RUNNER_DAEMON_JSON_MARKER = "/etc/docker/daemon.json"
 
 GITEA_HOST_PORTS_REQUIRED = [
     re.compile(r'^["\']?127\.0\.0\.1:.*:3000["\']?$'),
@@ -347,6 +359,46 @@ def check_g_tailscale_authkey_failfast(errors):
         )
 
 
+def check_h_gitea_runner_dind_hardening(errors):
+    """Check H: the gitea_runner role must run docker-init as PID 1
+    (init: true on BOTH deploy variants) AND pin the inner dind storage
+    driver via a bind-mounted /etc/docker/daemon.json.
+
+    Without init:true, PID 1 is s6-svscan (not a subreaper, verified on
+    the live runner) so crashlooping dind job-container zombies starve
+    the act_runner heartbeat. Without the pinned storage driver, dockerd
+    auto-probes overlay2 -> fuse-overlayfs (both fail on the DSM kernel)
+    on every (re)start and a job landing mid-probe crashloops. Lock both
+    in so a refactor can't silently regress them (Gitea
+    fallen-leaf/ansible-runner-image#15).
+    """
+    try:
+        with open(GITEA_RUNNER_TASKS) as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        errors.append(f"{GITEA_RUNNER_TASKS}: File not found")
+        return
+
+    init_count = text.count("init: true")
+    if init_count < GITEA_RUNNER_INIT_MIN:
+        errors.append(
+            f"{GITEA_RUNNER_TASKS}: expected `init: true` on both "
+            f"docker_container deploy variants (found {init_count}, need "
+            f"{GITEA_RUNNER_INIT_MIN}); without docker-init as PID 1 the "
+            f"runner does not subreap dind job-container zombies. See Gitea "
+            f"fallen-leaf/ansible-runner-image#15."
+        )
+
+    if GITEA_RUNNER_DAEMON_JSON_MARKER not in text:
+        errors.append(
+            f"{GITEA_RUNNER_TASKS}: missing the "
+            f"{GITEA_RUNNER_DAEMON_JSON_MARKER} storage-driver pin mount; "
+            f"the inner dind dockerd must not auto-probe the DSM-broken "
+            f"overlay2/fuse-overlayfs drivers. See Gitea "
+            f"fallen-leaf/ansible-runner-image#15."
+        )
+
+
 def main():
     errors = []
     warnings = []
@@ -375,6 +427,10 @@ def main():
 
     # Run check G: tailscale_sidecar must fail fast on a dead TS_AUTHKEY (#25)
     check_g_tailscale_authkey_failfast(errors)
+
+    # Run check H: gitea_runner must run docker-init PID 1 + pin dind
+    # storage driver (Gitea fallen-leaf/ansible-runner-image#15)
+    check_h_gitea_runner_dind_hardening(errors)
 
     # Report results
     for w in warnings:

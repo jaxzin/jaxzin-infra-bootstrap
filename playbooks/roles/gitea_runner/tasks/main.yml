@@ -60,6 +60,24 @@
   notify:
     - Restart Gitea runner
 
+# Pin the inner dind dockerd's storage driver. Bind-mounted to the dockerd
+# default config path (the runner's dockerd runs with no --config-file, so
+# /etc/docker/daemon.json is what it reads). Without this, dockerd
+# auto-probes overlay2 -> fuse-overlayfs (both fail on the DSM kernel) ->
+# btrfs on every (re)start; a job landing mid-probe crashloops, which
+# starves the act_runner heartbeat and flaps the runner offline. See
+# gitea_runner_storage_driver in defaults/main.yml and
+# Gitea fallen-leaf/ansible-runner-image#15.
+- name: Ensure dind daemon.json pins a working storage driver
+  copy:
+    dest: "{{ gitea_runner_dind_daemon_json }}"
+    content: "{{ {'storage-driver': gitea_runner_storage_driver} | to_nice_json }}\n"
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "users"
+    mode: '0644'
+  notify:
+    - Restart Gitea runner
+
 # --- Runner container deployment (conditional on Tailscale) ---
 
 # Healthcheck used by both deploy variants below. Detects the s6 init wedge
@@ -81,6 +99,14 @@
     image: "{{ gitea_runner_image }}"
     state: started
     restart_policy: always
+    # Run docker-init (tini) as PID 1 of this container so it subreaps
+    # zombies from dind-spawned job containers. Without --init, PID 1 is
+    # s6-svscan (verified on the live runner) which is not a subreaper;
+    # crashlooping job containers then leak zombies + libnetwork/conntrack
+    # state and starve the act_runner heartbeat (Gitea
+    # fallen-leaf/ansible-runner-image#15; same fix class as obsidian-mcp's
+    # vault-sync init:true).
+    init: true
     # Was: network_mode: "container:{{ tailscale_runner_container_name }}"
     # That share collapsed all egress through the sidecar's tailnet-only
     # interfaces, breaking LAN access for dind-spawned job containers
@@ -111,6 +137,8 @@
     }) }}"
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
+      # Pin the inner dind dockerd storage driver (see daemon.json task above).
+      - "{{ gitea_runner_dind_daemon_json }}:/etc/docker/daemon.json:ro"
       # dind's docker-init writes TLS server+client certs into /certs on first
       # start. Sharing this as a named volume lets job containers mount
       # /certs/client read-only so their docker CLI can speak TLS to the dind
@@ -130,6 +158,9 @@
     image: "{{ gitea_runner_image }}"
     state: started
     restart_policy: always
+    # See the with-Tailscale variant above: docker-init as PID 1 subreaps
+    # dind job-container zombies (Gitea fallen-leaf/ansible-runner-image#15).
+    init: true
     memory: "{{ gitea_runner_memory_limit }}"
     memory_swap: "{{ gitea_runner_memory_swap }}"
     networks:
@@ -145,6 +176,8 @@
       DOCKER_INSECURE_NO_IPTABLES_RAW: "1" # needed for Docker-in-Docker on the Synology DSM which does not include iptables_raw kernel module
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
+      # Pin the inner dind dockerd storage driver (see daemon.json task above).
+      - "{{ gitea_runner_dind_daemon_json }}:/etc/docker/daemon.json:ro"
       # dind's docker-init writes TLS server+client certs into /certs on first
       # start. Sharing this as a named volume lets job containers mount
       # /certs/client read-only so their docker CLI can speak TLS to the dind
