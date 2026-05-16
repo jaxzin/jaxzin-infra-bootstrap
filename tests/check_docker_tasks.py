@@ -14,14 +14,12 @@ Checks:
   G) tailscale_sidecar role must fail fast with an auth-aware message on an
      expired/revoked TS_AUTHKEY and assert a usable tailnet route, not just
      BackendState==Running (regression lock-in — see Gitea issue #25)
-  H) gitea_runner role must run docker-init as PID 1 (init: true on both
-     deploy variants) and pin the inner dind storage driver via a
-     /etc/docker/daemon.json bind-mount (regression lock-in — see Gitea
-     fallen-leaf/ansible-runner-image#15)
-  I) gitea_runner must give job containers an ssh->tailnet SOCKS5 path:
-     config.yaml.j2 container.options bind-mounts the static socat helper
-     and the ssh_config.d ProxyCommand snippet (regression lock-in — see
-     Gitea issue #25)
+  H) gitea_runner role must stay host-agnostic AND socket-mounted: the
+     runner container bind-mounts /var/run/docker.sock, and the role +
+     config template are free of Synology/dind/SOCKS/proxy coupling
+     (network_mode: container, /volume1, daemon.json, ts-socks5,
+     synology_dsm). Regression lock-in for the runner-on-a-generic-host
+     rearchitecture — see docs/runbooks/gitea-runner-host.md.
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -51,27 +49,23 @@ AUTHKEY_FAILFAST_MARKERS = (
 )
 
 GITEA_RUNNER_TASKS = f"{ROLES_DIR}/gitea_runner/tasks/main.yml"
-# Both gitea-runner deploy variants (with-Tailscale + standalone) must run
-# docker-init as PID 1 (init: true) AND pin the inner dind storage driver
-# via a bind-mounted /etc/docker/daemon.json. See Gitea
-# fallen-leaf/ansible-runner-image#15.
-GITEA_RUNNER_INIT_MIN = 2
-GITEA_RUNNER_DAEMON_JSON_MARKER = "/etc/docker/daemon.json"
-
 GITEA_RUNNER_CONFIG_TEMPLATE = f"{ROLES_DIR}/gitea_runner/templates/config.yaml.j2"
-GITEA_RUNNER_SSH_PROXY_TEMPLATE = f"{ROLES_DIR}/gitea_runner/templates/tailnet-ssh-proxy.conf.j2"
-# config.yaml.j2 container.options must bind-mount BOTH the static SOCKS5
-# helper and the ssh_config.d ProxyCommand snippet into job containers;
-# the snippet template must drive ssh through the sidecar's SOCKS5 server.
-# See Gitea issue #25.
-GITEA_RUNNER_SSH_PROXY_OPTION_MARKERS = (
-    ":/usr/local/bin/ts-socks5:ro",
-    ":/etc/ssh/ssh_config.d/10-tailnet-proxy.conf:ro",
-)
-GITEA_RUNNER_SSH_PROXY_TEMPLATE_MARKERS = (
-    "ProxyCommand",
-    "SOCKS5:",
-    "socksport=1055",
+
+# The runner is socket-mounted on a generic Linux host (no dind, no
+# Synology, no Tailscale-sidecar/SOCKS coupling). The bind-mount of the
+# host docker socket MUST be present; the markers below MUST be absent
+# from BOTH the task file and the rendered config template — each is a
+# fingerprint of the retired NAS/dind/SOCKS architecture. See
+# docs/runbooks/gitea-runner-host.md.
+GITEA_RUNNER_SOCKET_MOUNT_MARKER = "/var/run/docker.sock:/var/run/docker.sock"
+GITEA_RUNNER_FORBIDDEN_MARKERS = (
+    "network_mode: container",  # namespace-share with a sidecar
+    "/volume1",                 # Synology DSM host path
+    "daemon.json",              # dind storage-driver pin
+    "ts-socks5",                # static SOCKS5 ssh helper
+    "10-tailnet-proxy.conf",    # SOCKS ssh_config.d snippet
+    "synology_dsm",             # DSM-only runner label
+    "DOCKER_INSECURE_NO_IPTABLES_RAW",  # DSM dind workaround
 )
 
 GITEA_HOST_PORTS_REQUIRED = [
@@ -240,12 +234,11 @@ def check_d_gitea_sidecar_host_ports():
 
 
 RUNNER_FORBIDDEN_NETWORK_MODE_REASON = (
-    "The gitea-runner task must NOT use `network_mode: container:*`. Sharing the "
-    "Tailscale sidecar's namespace collapses egress to the sidecar's view; "
-    "dind-spawned job containers then can reach the tailnet but not the LAN "
-    "(see docs/architecture/tailscale-sidecar-modes.md). The runner sits on "
-    "gitea-net and reaches the tailnet via the sidecar's userspace HTTP/SOCKS5 "
-    "proxy instead."
+    "The gitea-runner task must NOT use `network_mode: container:*`. The runner "
+    "now runs on a generic Linux host with host-level Tailscale and reaches the "
+    "tailnet through the host (plain `network_mode: bridge`); sharing another "
+    "container's namespace is a fingerprint of the retired NAS Tailscale-sidecar "
+    "architecture. See docs/runbooks/gitea-runner-host.md."
 )
 
 
@@ -379,91 +372,47 @@ def check_g_tailscale_authkey_failfast(errors):
         )
 
 
-def check_h_gitea_runner_dind_hardening(errors):
-    """Check H: the gitea_runner role must run docker-init as PID 1
-    (init: true on BOTH deploy variants) AND pin the inner dind storage
-    driver via a bind-mounted /etc/docker/daemon.json.
+def check_h_gitea_runner_socket_mount(errors):
+    """Check H: the gitea_runner role must stay host-agnostic and
+    socket-mounted.
 
-    Without init:true, PID 1 is s6-svscan (not a subreaper, verified on
-    the live runner) so crashlooping dind job-container zombies starve
-    the act_runner heartbeat. Without the pinned storage driver, dockerd
-    auto-probes overlay2 -> fuse-overlayfs (both fail on the DSM kernel)
-    on every (re)start and a job landing mid-probe crashloops. Lock both
-    in so a refactor can't silently regress them (Gitea
-    fallen-leaf/ansible-runner-image#15).
+    The rearchitecture moved the runner off the Synology NAS onto a
+    generic Linux Docker host: a single plain (non-dind) act_runner that
+    bind-mounts the host's /var/run/docker.sock and reaches the tailnet
+    through the host's own Tailscale (no sidecar). This check is the
+    regression lock-in for that decision — it fails if the socket-mount
+    is dropped, or if any fingerprint of the retired NAS/dind/SOCKS
+    architecture (network_mode: container, /volume1, daemon.json,
+    ts-socks5, the SOCKS ssh_config.d snippet, the synology_dsm label,
+    the DSM dind iptables workaround) reappears in either the task file
+    or the rendered config template. See
+    docs/runbooks/gitea-runner-host.md.
     """
-    try:
-        with open(GITEA_RUNNER_TASKS) as fh:
-            text = fh.read()
-    except FileNotFoundError:
-        errors.append(f"{GITEA_RUNNER_TASKS}: File not found")
-        return
+    texts = {}
+    for path in (GITEA_RUNNER_TASKS, GITEA_RUNNER_CONFIG_TEMPLATE):
+        try:
+            with open(path) as fh:
+                texts[path] = fh.read()
+        except FileNotFoundError:
+            errors.append(f"{path}: File not found")
+            texts[path] = ""
 
-    init_count = text.count("init: true")
-    if init_count < GITEA_RUNNER_INIT_MIN:
+    if GITEA_RUNNER_SOCKET_MOUNT_MARKER not in texts.get(GITEA_RUNNER_TASKS, ""):
         errors.append(
-            f"{GITEA_RUNNER_TASKS}: expected `init: true` on both "
-            f"docker_container deploy variants (found {init_count}, need "
-            f"{GITEA_RUNNER_INIT_MIN}); without docker-init as PID 1 the "
-            f"runner does not subreap dind job-container zombies. See Gitea "
-            f"fallen-leaf/ansible-runner-image#15."
+            f"{GITEA_RUNNER_TASKS}: missing the host docker socket bind-mount "
+            f"({GITEA_RUNNER_SOCKET_MOUNT_MARKER}); the runner is socket-mounted "
+            f"on a generic host, not dind. See docs/runbooks/gitea-runner-host.md."
         )
 
-    if GITEA_RUNNER_DAEMON_JSON_MARKER not in text:
-        errors.append(
-            f"{GITEA_RUNNER_TASKS}: missing the "
-            f"{GITEA_RUNNER_DAEMON_JSON_MARKER} storage-driver pin mount; "
-            f"the inner dind dockerd must not auto-probe the DSM-broken "
-            f"overlay2/fuse-overlayfs drivers. See Gitea "
-            f"fallen-leaf/ansible-runner-image#15."
-        )
-
-
-def check_i_gitea_runner_job_tailnet_ssh(errors):
-    """Check I: job containers must get an ssh->tailnet SOCKS5 path.
-
-    `ssh` ignores *_PROXY and the dind job container has no tailnet
-    route/MagicDNS, so a plain `ssh host.<tailnet>` fails ENETUNREACH
-    (Gitea #25). The fix bind-mounts a static socat helper + an
-    ssh_config.d ProxyCommand snippet into every job container via
-    config.yaml.j2 container.options. Lock both surfaces in so a refactor
-    can't silently drop the #25 fix.
-    """
-    try:
-        with open(GITEA_RUNNER_CONFIG_TEMPLATE) as fh:
-            cfg = fh.read()
-    except FileNotFoundError:
-        errors.append(f"{GITEA_RUNNER_CONFIG_TEMPLATE}: File not found")
-        cfg = ""
-
-    miss_opt = [m for m in GITEA_RUNNER_SSH_PROXY_OPTION_MARKERS if m not in cfg]
-    if cfg and miss_opt:
-        errors.append(
-            f"{GITEA_RUNNER_CONFIG_TEMPLATE}: container.options missing job "
-            f"container ssh->tailnet mount(s) {miss_opt}; without the static "
-            f"SOCKS5 helper + ssh_config.d snippet, `ssh` to a tailnet host "
-            f"fails ENETUNREACH. See Gitea issue #25."
-        )
-
-    try:
-        with open(GITEA_RUNNER_SSH_PROXY_TEMPLATE) as fh:
-            tmpl = fh.read()
-    except FileNotFoundError:
-        errors.append(
-            f"{GITEA_RUNNER_SSH_PROXY_TEMPLATE}: File not found; the job "
-            f"container ssh ProxyCommand snippet is required for the Gitea "
-            f"#25 tailnet-ssh fix."
-        )
-        tmpl = ""
-
-    miss_t = [m for m in GITEA_RUNNER_SSH_PROXY_TEMPLATE_MARKERS if m not in tmpl]
-    if tmpl and miss_t:
-        errors.append(
-            f"{GITEA_RUNNER_SSH_PROXY_TEMPLATE}: missing marker(s) {miss_t}; "
-            f"the snippet must route ssh through the sidecar's SOCKS5 server "
-            f"(ProxyCommand ... SOCKS5: ... socksport=1055) so the tailnet "
-            f"side does MagicDNS + routing. See Gitea issue #25."
-        )
+    for path, text in texts.items():
+        for marker in GITEA_RUNNER_FORBIDDEN_MARKERS:
+            if marker in text:
+                errors.append(
+                    f"{path}: contains retired NAS/dind/SOCKS marker "
+                    f"{marker!r}; the runner now runs on a generic Linux host "
+                    f"(socket-mount, host-level Tailscale, no sidecar). See "
+                    f"docs/runbooks/gitea-runner-host.md."
+                )
 
 
 def main():
@@ -495,12 +444,9 @@ def main():
     # Run check G: tailscale_sidecar must fail fast on a dead TS_AUTHKEY (#25)
     check_g_tailscale_authkey_failfast(errors)
 
-    # Run check H: gitea_runner must run docker-init PID 1 + pin dind
-    # storage driver (Gitea fallen-leaf/ansible-runner-image#15)
-    check_h_gitea_runner_dind_hardening(errors)
-
-    # Run check I: job containers must get an ssh->tailnet SOCKS5 path (#25)
-    check_i_gitea_runner_job_tailnet_ssh(errors)
+    # Run check H: gitea_runner must stay host-agnostic + socket-mounted
+    # (runner-on-a-generic-host rearchitecture lock-in)
+    check_h_gitea_runner_socket_mount(errors)
 
     # Report results
     for w in warnings:

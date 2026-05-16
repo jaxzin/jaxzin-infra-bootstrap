@@ -4,11 +4,9 @@
 # =============================================================================
 tailscale_tailnet: "{{ lookup('ansible.builtin.env', 'TS_TAILNET') }}"
 lan_domain: "{{ lookup('ansible.builtin.env', 'NAS_HOST') }}"
-# LAN DNS suffix (e.g. ".lan.example.com") used for NO_PROXY exemption
-# inside the gitea-runner so LAN hostnames bypass the userspace tailnet
-# proxy. Treated as topology (a Secret on both GitHub and Gitea Actions);
-# never bake the literal value into committed config. Must include the
-# leading dot (NO_PROXY treats a leading dot as a domain-suffix match).
+# LAN DNS suffix (e.g. ".lan.example.com"). Treated as topology (a Secret
+# on both GitHub and Gitea Actions); never bake the literal value into
+# committed config.
 lan_domain_suffix: "{{ lookup('ansible.builtin.env', 'LAN_DOMAIN_SUFFIX') | default('', true) }}"
 
 # =============================================================================
@@ -19,15 +17,12 @@ tailscale_image: "tailscale/tailscale:latest"
 tailscale_authkey: "{{ lookup('ansible.builtin.env', 'TS_AUTHKEY') }}"
 tailscale_network_name: "{{ gitea_network_name }}"
 tailscale_data_path: "{{ gitea_data_path }}/tailscale"
-# Gitea sidecar
+# Gitea sidecar (the runner has NO sidecar — it runs on a separate
+# tailnet host; see docs/runbooks/gitea-runner-host.md)
 tailscale_gitea_container_name: "tailscale-gitea"
 tailscale_gitea_hostname: "gitea"
 tailscale_gitea_state_dir: "{{ tailscale_data_path }}/gitea-state"
 tailscale_gitea_serve_config_dir: "{{ tailscale_data_path }}/gitea-serve-config"
-# Runner sidecar
-tailscale_runner_container_name: "tailscale-runner"
-tailscale_runner_hostname: "gitea-runner"
-tailscale_runner_state_dir: "{{ tailscale_data_path }}/runner-state"
 
 # =============================================================================
 # DNS / certificate management
@@ -76,9 +71,9 @@ gitea_api_base_url: "http://127.0.0.1:{{ gitea_port }}"
 # Runner instance URL (via tailnet)
 gitea_instance_url: "https://gitea.{{ tailscale_tailnet }}"
 
-# Data paths
+# Data paths (NAS-only; the runner owns its own host-neutral data path —
+# see the gitea_runner role defaults / docs/runbooks/gitea-runner-host.md)
 gitea_data_path: "/volume1/docker/gitea"
-gitea_runner_data_path: "{{ gitea_data_path }}/gitea-runner"
 certbot_data_path: "/volume1/docker/certbot"
 
 # Gitea configuration paths
@@ -89,8 +84,8 @@ gitea_app_ini_path_container: "/etc/gitea/app.ini"
 gitea_image_tag: "1.25.5-rootless"
 gitea_image: "gitea/gitea:{{ gitea_image_tag }}"
 gitea_db_image: "mysql:8"
-gitea_runner_image_tag: "0.2.12-dind"
-gitea_runner_image: "gitea/act_runner:{{ gitea_runner_image_tag }}"
+# gitea_runner_image is owned by the gitea_runner role (plain, non-dind
+# act_runner). Override per-host via the GITEA_RUNNER_IMAGE CI variable.
 
 # Database credentials (from environment)
 gitea_db_name: "gitea"

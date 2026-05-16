@@ -102,71 +102,6 @@
       include_role:
         name: gitea_server
 
-    - name: Detect if running in Gitea
-      set_fact:
-        in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true' }}"
-
-    - name: Deploy Tailscale sidecar for Runner
-      include_role:
-        name: tailscale_sidecar
-      vars:
-        tailscale_container_name: "{{ tailscale_runner_container_name }}"
-        tailscale_hostname: "{{ tailscale_runner_hostname }}"
-        tailscale_state_dir: "{{ tailscale_runner_state_dir }}"
-        tailscale_serve_enabled: false
-        tailscale_host_ports: []
-        # The runner sidecar runs in userspace networking mode so peer
-        # containers on gitea-net (gitea-runner + its dind-spawned job
-        # containers) can route outbound tailnet traffic through the
-        # sidecar's SOCKS5/HTTP proxy without sharing its network
-        # namespace. Sharing the namespace (the old `network_mode:
-        # container:tailscale-runner` pattern) prevented job containers
-        # from reaching the LAN, because the sidecar's namespace only had
-        # tailnet interfaces. The Gitea sidecar stays in kernel mode
-        # because Tailscale Serve (HTTPS termination) requires the kernel
-        # TUN device.
-        tailscale_userspace_networking: true
-      when: not in_gitea
-
-    # Capture the runner sidecar's gitea-net IP so we can inject it as an
-    # /etc/hosts entry into every job container the embedded dind dockerd
-    # spawns inside gitea-runner. The dind dockerd creates its own internal
-    # bridge networks for job containers; those networks don't share
-    # gitea-net's embedded DNS, so "tailscale-runner" is unresolvable from
-    # inside a job container. Workflows that hit the userspace HTTP/SOCKS5
-    # proxy (http://tailscale-runner:1099, socks5://tailscale-runner:1055)
-    # would fail to even resolve the hostname.
-    #
-    # Quick fix: read the sidecar's bridge IP at deploy time and bake it into
-    # `container.options` (--add-host) in the runner config. Brittle if the
-    # sidecar restarts and Docker hands it a different IP from its DHCP pool;
-    # re-running this playbook re-captures the IP and reconciles. Acceptable
-    # for the current single-runner scale.
-    #
-    # Permanent fix (future): drop dind entirely and mount the host
-    # /var/run/docker.sock into the runner instead. Job containers would
-    # then live on gitea-net directly and inherit its embedded DNS. That
-    # breaks the runner's isolation guarantees, so it's a deliberate
-    # trade-off, not a free improvement. See
-    # docs/architecture/tailscale-sidecar-modes.md.
-    - name: Inspect Tailscale runner sidecar for gitea-net IP
-      community.docker.docker_container_info:
-        name: "{{ tailscale_runner_container_name }}"
-      register: tailscale_runner_container_info
-      when: not in_gitea
-
-    - name: Set tailscale-runner gitea-net IP fact
-      set_fact:
-        tailscale_runner_gitea_net_ip: >-
-          {{ tailscale_runner_container_info.container.NetworkSettings.Networks[gitea_network_name].IPAddress }}
-      when: not in_gitea
-
-    # only install the Gitea runner if bootstrapping the server from GitHub
-    - name: Include gitea_runner role
-      include_role:
-        name: gitea_runner
-      when: not in_gitea
-
     - name: Configure Gitea Backups
       # NOTE: This is a static import, not an include.
       # It runs before the playbook starts regardless of the order
@@ -181,3 +116,40 @@
         b2_application_key: "{{ lookup('ansible.builtin.env', 'B2_APPLICATION_KEY') }}"
       tags:
         - backup_config
+
+# ---------------------------------------------------------------------------
+# Play 2: Gitea Actions runner — a SEPARATE host from the NAS.
+#
+# The runner is intentionally decoupled from the Synology NAS play above. It
+# targets the `gitea_runner` inventory group (host + creds injected from
+# their own CI secrets — the group is never named after a specific host in
+# this repo). The host contract is documented in
+# docs/runbooks/gitea-runner-host.md; the only hard expectations are: Linux
+# + Docker, SSH-by-key as a `docker`-group user (hence become: false), and
+# host-level Tailscale for tailnet reach.
+#
+# DR / steady-state: this play runs in the SAME ansible-playbook invocation
+# as Play 1, so the admin API token the gitea_server role just provisioned
+# is borrowed across plays via hostvars (the runner host never stores or
+# mints it — it only uses it once to obtain its own registration token).
+# Running the bootstrap deploy therefore brings the runner online as part
+# of bootstrap; there is no separate "deploy the runner" step.
+# ---------------------------------------------------------------------------
+- name: Deploy the Gitea Actions runner
+  hosts: gitea_runner
+  become: false
+  gather_facts: true # need ansible_user_dir for the default data path
+  vars_files:
+    - vars/main.yml
+  vars:
+    gitea_api_token: "{{ hostvars[groups['nas'][0]].gitea_api_token }}"
+    # Skip runner provisioning when the deploy is triggered from inside
+    # Gitea Actions (the github->gitea mirror flow); only the GitHub
+    # bootstrap deploy provisions the runner.
+    in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true' }}"
+
+  tasks:
+    - name: Deploy the Gitea runner (bootstrap-from-GitHub only)
+      include_role:
+        name: gitea_runner
+      when: not in_gitea

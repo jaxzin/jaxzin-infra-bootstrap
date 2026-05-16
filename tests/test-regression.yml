@@ -205,35 +205,20 @@
           consumers can opt into userspace mode.
 
     # ================================================================
-    # Check 7: gitea_runner config.yaml.j2 renders proxy env correctly
+    # Check 7: gitea_runner config.yaml.j2 renders host-agnostic +
+    #          socket-mount-clean (no NAS/dind/SOCKS fingerprints)
     # ================================================================
-    # End-to-end render of the Jinja2 template with synthetic but
-    # realistic values, then asserts on the resulting YAML. Catches both
-    # template-rendering regressions and proxy-env content drift (e.g.
-    # someone removes ALL_PROXY, swaps the port, or breaks NO_PROXY).
-    - name: "CHECK 7: Render gitea_runner config.yaml.j2 with synthetic vars"
+    # The runner moved off the NAS to a generic Linux Docker host
+    # (socket-mount, host-level Tailscale, no sidecar). The template is
+    # now fully static — this end-to-end render asserts the RENDERED
+    # artifact carries none of the retired proxy/SOCKS/dind/Synology
+    # surface and does carry the new socket-mount shape. Complements
+    # check_docker_tasks.py Check H (which greps source) by validating
+    # what actually ships. See docs/runbooks/gitea-runner-host.md.
+    - name: "CHECK 7: Render gitea_runner config.yaml.j2"
       template:
         src: "{{ roles_dir }}/gitea_runner/templates/config.yaml.j2"
         dest: /tmp/test-gitea-runner-config.yml
-      vars:
-        # Match the production var names so the template compiles without
-        # touching the real defaults/main.yml. The values are synthetic.
-        tailscale_runner_container_name: "tailscale-runner"
-        tailscale_runner_gitea_net_ip: "172.20.0.42"
-        lan_domain_suffix: ".lan.test.example"
-        # Job-container ssh->tailnet SOCKS5 mounts (Gitea #25). Synthetic
-        # host paths so the template renders without the real defaults.
-        gitea_runner_socks_helper_host_path: "/tmp/test/conf/ts-socks5"
-        gitea_runner_tailnet_ssh_config_host_path: "/tmp/test/conf/10-tailnet-proxy.conf"
-        # config.yaml.j2 mounts use the in-dind path (resolved in the
-        # gitea-runner container), not the host path. See defaults/main.yml.
-        gitea_runner_socks_helper_indind_path: "/data/conf/ts-socks5"
-        gitea_runner_tailnet_ssh_config_indind_path: "/data/conf/10-tailnet-proxy.conf"
-        gitea_runner_proxy_env:
-          HTTPS_PROXY: "http://tailscale-runner:1099"
-          HTTP_PROXY: "http://tailscale-runner:1099"
-          ALL_PROXY: "socks5://tailscale-runner:1055"
-          NO_PROXY: "localhost,127.0.0.1,docker,host.docker.internal,.lan.test.example,tailscale-runner,gitea-db,gitea-runner"
 
     - name: "CHECK 7: Read rendered gitea_runner config"
       slurp:
@@ -244,49 +229,32 @@
       set_fact:
         rendered_runner_config: "{{ rendered_runner_config_raw.content | b64decode }}"
 
-    - name: "CHECK 7: Assert HTTPS_PROXY uses the userspace HTTP CONNECT port"
+    - name: "CHECK 7: Assert NO retired NAS/dind/SOCKS fingerprints"
       assert:
         that:
-          - "'HTTPS_PROXY: \"http://tailscale-runner:1099\"' in rendered_runner_config"
+          - "'HTTPS_PROXY' not in rendered_runner_config"
+          - "'ALL_PROXY' not in rendered_runner_config"
+          - "'ts-socks5' not in rendered_runner_config"
+          - "'tailscale-runner' not in rendered_runner_config"
+          - "'10-tailnet-proxy.conf' not in rendered_runner_config"
+          - "'synology_dsm' not in rendered_runner_config"
+          - "'daemon.json' not in rendered_runner_config"
         fail_msg: >
-          Rendered runner config must export
-          HTTPS_PROXY=http://tailscale-runner:1099. Got:
+          Rendered runner config still carries a retired
+          proxy/SOCKS/dind/Synology fingerprint. The runner now runs on a
+          generic Linux host via socket-mount. Got:
           {{ rendered_runner_config }}
 
-    - name: "CHECK 7: Assert ALL_PROXY uses the userspace SOCKS5 port"
+    - name: "CHECK 7: Assert the socket-mount runner shape is present"
       assert:
         that:
-          - "'ALL_PROXY: \"socks5://tailscale-runner:1055\"' in rendered_runner_config"
+          # privileged is only needed for dind, which is gone.
+          - "'privileged: false' in rendered_runner_config"
+          - "'self-hosted' in rendered_runner_config"
+          - "'ubuntu-latest:docker://docker.gitea.com/runner-images:ubuntu-latest' in rendered_runner_config"
         fail_msg: >
-          Rendered runner config must export
-          ALL_PROXY=socks5://tailscale-runner:1055. Got:
-          {{ rendered_runner_config }}
-
-    - name: "CHECK 7: Assert NO_PROXY exempts the LAN suffix and gitea-net peers"
-      assert:
-        that:
-          # LAN suffix from the test fixture (proves the variable is wired
-          # through the proxy-env dict, not hardcoded in the template).
-          - "'.lan.test.example' in rendered_runner_config"
-          # Real container short names that Docker DNS resolves on
-          # gitea-net (NOT the network name itself, which is a no-op).
-          - "'tailscale-runner,gitea-db,gitea-runner' in rendered_runner_config"
-        fail_msg: >
-          Rendered runner config NO_PROXY must include the LAN suffix
-          and gitea-net container short names. Got:
-          {{ rendered_runner_config }}
-
-    - name: "CHECK 7: Assert add-host injection placeholder is documented"
-      assert:
-        that:
-          # The IP-injection lives in container.options (not envs), but
-          # the template should reference the variable so it renders
-          # under test. Asserts the var is consumed somewhere.
-          - "'172.20.0.42' in rendered_runner_config"
-        fail_msg: >
-          Rendered runner config must reference
-          tailscale_runner_gitea_net_ip (deploy-time IP injection for
-          dind-spawned job containers). Got:
+          Rendered runner config is missing the expected socket-mount
+          shape (privileged:false + the standard labels). Got:
           {{ rendered_runner_config }}
 
     # ================================================================

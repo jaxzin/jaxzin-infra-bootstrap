@@ -34,12 +34,6 @@ jobs:
       GITEA_LAN_HOST: ${{ secrets.GITEA_LAN_HOST || secrets.MYGITEA_LAN_HOST }}
       GITEA_LAN_SSH_PORT: ${{ secrets.GITEA_LAN_SSH_PORT || secrets.MYGITEA_LAN_SSH_PORT }}
       LAN_DOMAIN_SUFFIX: ${{ secrets.LAN_DOMAIN_SUFFIX }}
-      # Non-secret (public ERNW release URL + its sha256) → Variables, not
-      # Secrets. Consumed by the gitea_runner role to fetch the static
-      # socat that gives job containers an ssh->tailnet SOCKS5 path
-      # (Gitea #25; see docs/runbooks/job-container-tailnet-ssh.md).
-      GITEA_RUNNER_SOCKS_HELPER_URL: ${{ vars.GITEA_RUNNER_SOCKS_HELPER_URL }}
-      GITEA_RUNNER_SOCKS_HELPER_SHA256: ${{ vars.GITEA_RUNNER_SOCKS_HELPER_SHA256 }}
       GITEA_RESTORE: ${{ inputs.recover }}
       B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
       B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
@@ -87,6 +81,20 @@ jobs:
             echo "Ansible is already available on the PATH."
           fi
 
+      # The Gitea runner is a SEPARATE host from the NAS with its own
+      # credentials (see docs/runbooks/gitea-runner-host.md). The action's
+      # `key:` input only loads ONE key (the NAS key), so stage the runner
+      # host's private key to a 0600 file and point its inventory entry at
+      # it via ansible_ssh_private_key_file. /tmp persists across steps in
+      # the same job container.
+      - name: Stage the Gitea runner host SSH key
+        env:
+          GITEA_RUNNER_SSH_KEY: ${{ secrets.GITEA_RUNNER_SSH_KEY }}
+        run: |
+          set -eu
+          install -m 600 /dev/null /tmp/gitea_runner_ssh_key
+          printf '%s\n' "$GITEA_RUNNER_SSH_KEY" > /tmp/gitea_runner_ssh_key
+
       - name: Deploy infrastructure
         id: deploy
         uses: dawidd6/action-ansible-playbook@v4
@@ -101,5 +109,7 @@ jobs:
           inventory: |
             [nas]
             ${{ secrets.NAS_HOST }} ansible_user="${{ secrets.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
+            [gitea_runner]
+            ${{ secrets.GITEA_RUNNER_HOST }} ansible_user="${{ secrets.GITEA_RUNNER_SSH_USER }}" ansible_ssh_private_key_file="/tmp/gitea_runner_ssh_key"
           requirements: galaxy-requirements.yml
           options: ${{ inputs.dry_run && '--check --diff' || '' }}

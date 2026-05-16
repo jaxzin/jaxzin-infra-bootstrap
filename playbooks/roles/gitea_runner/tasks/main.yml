@@ -1,11 +1,14 @@
 ---
+# Deploy a Gitea Actions runner as a single socket-mounted container.
+# Host-agnostic by design — see defaults/main.yml and
+# docs/runbooks/gitea-runner-host.md for the host contract. This role runs
+# with become: false: every path below lives under the deploy user's own
+# data dir and Docker is reached via the user's `docker` group membership.
 
 - name: Ensure Gitea runner config directory exists
   file:
     path: "{{ gitea_runner_config_file_parent }}"
     state: directory
-    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
-    group: "users"
     mode: '0755'
 
 - name: Check if Gitea runner token is already persisted
@@ -29,13 +32,17 @@
 - name: Generate and persist Gitea runner token if it does not exist
   when: not runner_token_file.stat.exists
   block:
+    # Minted over the tailnet instance URL (gitea_runner_api_base_url),
+    # reachable from this tailnet host — NOT the NAS-loopback API. The
+    # admin token (gitea_api_token) is provided by the caller; in the
+    # bootstrap deploy it comes from the gitea_server play via hostvars.
     - name: Get Gitea runner registration token
       uri:
-        url: "{{ gitea_api_base_url }}/api/v1/admin/runners/registration-token"
+        url: "{{ gitea_runner_api_base_url }}/api/v1/admin/runners/registration-token"
         method: GET
         headers:
           Authorization: "token {{ gitea_api_token }}"
-        validate_certs: no
+        validate_certs: "{{ gitea_runner_api_validate_certs }}"
       register: new_runner_token_result
 
     - name: Set runner token fact from new token
@@ -46,192 +53,44 @@
       copy:
         content: "{{ gitea_runner_token }}"
         dest: "{{ gitea_runner_config_file_parent }}/runner_token.txt"
-        owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
-        group: "users"
         mode: '0600'
 
 - name: Ensure Gitea runner config file exists
   template:
     src: config.yaml.j2
     dest: "{{ gitea_runner_config_file }}"
-    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
-    group: "users"
     mode: '0644'
   notify:
     - Restart Gitea runner
 
-# Pin the inner dind dockerd's storage driver. Bind-mounted to the dockerd
-# default config path (the runner's dockerd runs with no --config-file, so
-# /etc/docker/daemon.json is what it reads). Without this, dockerd
-# auto-probes overlay2 -> fuse-overlayfs (both fail on the DSM kernel) ->
-# btrfs on every (re)start; a job landing mid-probe crashloops, which
-# starves the act_runner heartbeat and flaps the runner offline. See
-# gitea_runner_storage_driver in defaults/main.yml and
-# Gitea fallen-leaf/ansible-runner-image#15.
-- name: Ensure dind daemon.json pins a working storage driver
-  copy:
-    dest: "{{ gitea_runner_dind_daemon_json }}"
-    content: "{{ {'storage-driver': gitea_runner_storage_driver} | to_nice_json }}\n"
-    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
-    group: "users"
-    mode: '0644'
-  notify:
-    - Restart Gitea runner
-
-# --- Tailnet ssh path for dind job containers (Gitea #25) ---
-# These two host files are bind-mounted read-only into every job container
-# (see container.options in templates/config.yaml.j2). Must exist before
-# the runner container starts so the mounts resolve.
-
-- name: Require a pinned static SOCKS5 helper for the job-container tailnet ssh path
-  assert:
-    that:
-      - gitea_runner_socks_helper_url | length > 0
-      - gitea_runner_socks_helper_sha256 | length > 0
-    fail_msg: >-
-      GITEA_RUNNER_SOCKS_HELPER_URL and GITEA_RUNNER_SOCKS_HELPER_SHA256 must
-      be set to a trusted static `socat` build — it runs inside every CI job
-      container to give `ssh` a SOCKS5 path to tailnet hosts (Gitea #25). No
-      default is shipped on purpose (guessing a binary download is a
-      supply-chain risk). See docs/runbooks/job-container-tailnet-ssh.md.
-    success_msg: "Static SOCKS5 helper source is pinned (url + sha256)."
-
-- name: Fetch the pinned static SOCKS5 helper (socat) to the runner host
-  ansible.builtin.get_url:
-    url: "{{ gitea_runner_socks_helper_url }}"
-    dest: "{{ gitea_runner_socks_helper_host_path }}"
-    checksum: "sha256:{{ gitea_runner_socks_helper_sha256 }}"
-    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
-    group: "users"
-    mode: '0755'
-  notify:
-    - Restart Gitea runner
-
-- name: Template the tailnet ssh ProxyCommand config for job containers
-  # owner/group MUST be root: bind-mounted into job containers at
-  # /etc/ssh/ssh_config.d/10-tailnet-proxy.conf, OpenSSH strict-checks
-  # Included global config and requires st_uid==0 (or the running user).
-  # A host-uid-owned file → "Bad owner or permissions" → ssh discards the
-  # whole config → ProxyCommand never applies (Gitea #25). The playbook
-  # runs become: true, so chown to root succeeds.
-  template:
-    src: tailnet-ssh-proxy.conf.j2
-    dest: "{{ gitea_runner_tailnet_ssh_config_host_path }}"
-    owner: root
-    group: root
-    mode: '0644'
-  notify:
-    - Restart Gitea runner
-
-# --- Runner container deployment (conditional on Tailscale) ---
-
-# Healthcheck used by both deploy variants below. Detects the s6 init wedge
-# observed 2026-05-02 after a NAS dirty restart: dockerd inside the runner
-# came up, but s6 didn't fire its docker-ready signal, so act_runner stayed
-# blocked on `s6-svwait -U /etc/s6/docker` and never started polling. Docker
-# saw the container as "Up" the whole time. The healthcheck below greps
-# /proc for an act_runner process; if missing, Docker marks unhealthy and
-# `restart_policy: always` recreates the container (which re-runs s6 init,
-# usually clean the second time).
-#
-# We can't `pgrep act_runner` because the dind image doesn't ship pgrep —
-# fall back to `grep -q act_runner /proc/*/comm`. The `[a]` trick avoids
-# matching the grep itself.
-
-- name: Deploy Gitea runner container (with Tailscale sidecar)
+# Single deploy variant. The runner reaches the tailnet (to talk to Gitea
+# and for jobs that ssh tailnet hosts) through the HOST's Tailscale, not a
+# sidecar — so plain bridge networking is correct here. Job containers are
+# spawned on the host's Docker daemon via the bind-mounted socket, so they
+# inherit the host's networking and DNS directly. `network_mode: bridge`
+# is explicit (never `container:<sidecar>` — see tests/check_docker_tasks.py
+# Check E and docs/runbooks/gitea-runner-host.md).
+- name: Deploy Gitea runner container (socket-mounted)
   community.docker.docker_container:
     name: gitea-runner
     image: "{{ gitea_runner_image }}"
     state: started
     restart_policy: always
-    # Run docker-init (tini) as PID 1 of this container so it subreaps
-    # zombies from dind-spawned job containers. Without --init, PID 1 is
-    # s6-svscan (verified on the live runner) which is not a subreaper;
-    # crashlooping job containers then leak zombies + libnetwork/conntrack
-    # state and starve the act_runner heartbeat (Gitea
-    # fallen-leaf/ansible-runner-image#15; same fix class as obsidian-mcp's
-    # vault-sync init:true).
-    init: true
-    # Was: network_mode: "container:{{ tailscale_runner_container_name }}"
-    # That share collapsed all egress through the sidecar's tailnet-only
-    # interfaces, breaking LAN access for dind-spawned job containers
-    # (they could reach 100.64.0.0/10 via tailscale0 but not 192.168.x.x).
-    # Now: runner sits on the same Docker bridge as the userspace-mode
-    # sidecar, has direct LAN access via the host, and reaches the tailnet
-    # by HTTPS_PROXY/SOCKS5 through the sidecar.
-    networks:
-      - name: "{{ gitea_network_name }}"
-    privileged: true
-    # Outbound HTTPS to the Gitea tailnet URL routes through the sidecar's
-    # userspace HTTP CONNECT proxy (HTTPS_PROXY/HTTP_PROXY) and SOCKS5
-    # (ALL_PROXY). LAN destinations bypass the proxy via NO_PROXY so they
-    # egress directly through the host's LAN interface. The shared
-    # gitea_runner_proxy_env dict (see defaults/main.yml) is also rendered
-    # into the runner config so dind-spawned job containers inherit the
-    # same proxy env.
-    #
-    # DOCKER_INSECURE_NO_IPTABLES_RAW=1 is required for the embedded
-    # Docker-in-Docker dockerd on Synology DSM, which does not include
-    # the iptables_raw kernel module.
-    env: "{{ gitea_runner_proxy_env | combine({
-      'CONFIG_FILE': '/data/conf/config.yml',
-      'GITEA_INSTANCE_URL': gitea_instance_url,
-      'GITEA_RUNNER_REGISTRATION_TOKEN': gitea_runner_token,
-      'GITEA_RUNNER_NAME': 'nas-runner',
-      'DOCKER_INSECURE_NO_IPTABLES_RAW': '1',
-    }) }}"
-    volumes:
-      - "{{ gitea_runner_data_path }}:/data"
-      # Pin the inner dind dockerd storage driver (see daemon.json task above).
-      - "{{ gitea_runner_dind_daemon_json }}:/etc/docker/daemon.json:ro"
-      # dind's docker-init writes TLS server+client certs into /certs on first
-      # start. Sharing this as a named volume lets job containers mount
-      # /certs/client read-only so their docker CLI can speak TLS to the dind
-      # dockerd (see container.options in templates/config.yaml.j2).
-      - "gitea-runner-certs:/certs"
-    healthcheck:
-      test: ["CMD-SHELL", "grep -q act_runner /proc/[0-9]*/comm 2>/dev/null || exit 1"]
-      interval: 60s
-      timeout: 5s
-      retries: 3
-      start_period: 2m
-  when: tailscale_enabled | default(false) | bool
-
-- name: Deploy Gitea runner container (standalone)
-  community.docker.docker_container:
-    name: gitea-runner
-    image: "{{ gitea_runner_image }}"
-    state: started
-    restart_policy: always
-    # See the with-Tailscale variant above: docker-init as PID 1 subreaps
-    # dind job-container zombies (Gitea fallen-leaf/ansible-runner-image#15).
-    init: true
-    memory: "{{ gitea_runner_memory_limit }}"
-    memory_swap: "{{ gitea_runner_memory_swap }}"
-    networks:
-      - name: "{{ gitea_network_name }}"
-    dns_opts:
-      - "ndots:0"
-    privileged: true
+    network_mode: bridge
     env:
       CONFIG_FILE: "/data/conf/config.yml"
-      GITEA_INSTANCE_URL: "{{ gitea_instance_url | default('https://' + gitea_domain + ':' + gitea_port) }}"
+      GITEA_INSTANCE_URL: "{{ gitea_instance_url }}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "{{ gitea_runner_token }}"
-      GITEA_RUNNER_NAME: "nas-runner"
-      DOCKER_INSECURE_NO_IPTABLES_RAW: "1" # needed for Docker-in-Docker on the Synology DSM which does not include iptables_raw kernel module
+      GITEA_RUNNER_NAME: "{{ gitea_runner_name }}"
     volumes:
       - "{{ gitea_runner_data_path }}:/data"
-      # Pin the inner dind dockerd storage driver (see daemon.json task above).
-      - "{{ gitea_runner_dind_daemon_json }}:/etc/docker/daemon.json:ro"
-      # dind's docker-init writes TLS server+client certs into /certs on first
-      # start. Sharing this as a named volume lets job containers mount
-      # /certs/client read-only so their docker CLI can speak TLS to the dind
-      # dockerd (see container.options in templates/config.yaml.j2).
-      - "gitea-runner-certs:/certs"
+      # Socket-mount: job containers run on the host's Docker daemon. This
+      # is the deliberate single-tenant trade-off that retires dind (see
+      # docs/runbooks/gitea-runner-host.md "Security trade-off").
+      - "/var/run/docker.sock:/var/run/docker.sock"
     healthcheck:
       test: ["CMD-SHELL", "grep -q act_runner /proc/[0-9]*/comm 2>/dev/null || exit 1"]
       interval: 60s
       timeout: 5s
       retries: 3
       start_period: 2m
-  when: not (tailscale_enabled | default(false) | bool)
