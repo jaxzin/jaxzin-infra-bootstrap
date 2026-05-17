@@ -78,9 +78,17 @@ sudo ./bootstrap-runner.sh
 ```
 
 It installs Docker + Tailscale, creates the deploy user in the `docker`
-group, runs **interactive** `tailscale up --ssh` (operator authenticates
-in a browser — **no `TS_AUTHKEY`, no SSH key**), and prints the values to
-put in CI. It stores no secrets.
+group, enables **Tailscale SSH** (interactive `tailscale up --ssh` browser
+login on a fresh host; `tailscale set --ssh` on an already-joined node, so
+existing tailnet prefs are untouched — **no `TS_AUTHKEY`, no SSH key**),
+and prints the values to put in CI. It stores no secrets.
+
+Before the Tailscale-SSH step — the one action that can drop your current
+session if you're connected over Tailscale — it **prompts for
+confirmation (default No)** so you can abort and re-run later (it is
+idempotent and resumes there). Run it from the host's local console to
+avoid the disconnect, or set `BOOTSTRAP_RUNNER_ASSUME_YES=1` for an
+unattended run.
 
 ## Security trade-off (accept knowingly)
 

@@ -31,9 +31,15 @@
 #   * The tailnet ACL policy MUST permit that CI identity to Tailscale-SSH
 #     into this host as the deploy user.
 #
+# Before enabling Tailscale SSH (the one step that can drop your current
+# session if you're connected over Tailscale) the script PROMPTS for
+# confirmation — default No, so you can nope out and re-run later. For an
+# unattended run, set BOOTSTRAP_RUNNER_ASSUME_YES=1 to skip that prompt.
+#
 # Usage:
 #   sudo ./bootstrap-runner.sh
 #   sudo GITEA_RUNNER_DEPLOY_USER=ci ./bootstrap-runner.sh
+#   sudo BOOTSTRAP_RUNNER_ASSUME_YES=1 ./bootstrap-runner.sh   # unattended
 #
 set -euo pipefail
 
@@ -83,6 +89,42 @@ ensure_deploy_user() {
   fi
 }
 
+# Escape hatch before the one step that can sever the operator's own
+# session. stdin is often the `curl | sudo bash` pipe, so prompt/read on
+# /dev/tty (NOT stdin) or it would consume script bytes / get EOF.
+confirm_ssh_enable() {
+  if [ "${BOOTSTRAP_RUNNER_ASSUME_YES:-}" = "1" ]; then
+    warn "BOOTSTRAP_RUNNER_ASSUME_YES=1 set — skipping the disconnect confirmation"
+    return 0
+  fi
+  if [ ! -r /dev/tty ]; then
+    die "the next step enables Tailscale SSH and may drop this session, but there is no terminal to confirm on. Re-run from a terminal, or set BOOTSTRAP_RUNNER_ASSUME_YES=1 for an unattended run."
+  fi
+  {
+    printf '\n'
+    printf '\033[1;33m[bootstrap-runner] ⚠  NEXT STEP ENABLES TAILSCALE SSH.\033[0m\n'
+    printf '   If you are connected to this host over Tailscale, THIS SSH\n'
+    printf '   SESSION MAY DISCONNECT.\n'
+    printf '   It is safe: this script is idempotent. Reconnect (via\n'
+    printf '   Tailscale SSH) and re-run — it skips everything already done.\n'
+    printf '   To avoid the disconnect entirely, run this from the host'\''s\n'
+    printf '   local console instead.\n'
+    printf '[bootstrap-runner] Proceed and enable Tailscale SSH now? [y/N] '
+  } > /dev/tty
+  local reply=""
+  read -r reply < /dev/tty || reply=""
+  case "$reply" in
+    [yY] | [yY][eE][sS]) log "operator confirmed — enabling Tailscale SSH" ;;
+    *)
+      warn "Aborted by operator before the Tailscale SSH change."
+      warn "INCOMPLETE: Tailscale SSH is NOT enabled yet (Docker + deploy"
+      warn "user + group WERE set up). Re-run this script when ready —"
+      warn "it is idempotent and will resume at this step."
+      exit 0
+      ;;
+  esac
+}
+
 ensure_tailscale_ssh() {
   if command -v tailscale >/dev/null 2>&1; then
     log "tailscale present: $(tailscale version | head -1)"
@@ -91,6 +133,13 @@ ensure_tailscale_ssh() {
     curl -fsSL https://tailscale.com/install.sh | sh
   fi
   systemctl enable --now tailscaled
+
+  confirm_ssh_enable
+
+  # `--accept-risk=lose-ssh`: enabling Tailscale SSH reroutes SSH and can
+  # drop the in-flight session; Tailscale aborts without this. The
+  # operator just acknowledged it via confirm_ssh_enable above.
+  #
   # Idempotent + SAFE on an already-configured tailnet node:
   #   * Already logged in  -> `tailscale set --ssh` flips ONLY the SSH
   #     preference and leaves every other pref (tags, routes, exit-node,
@@ -103,11 +152,11 @@ ensure_tailscale_ssh() {
   # `tailscale status` exits 0 only when the node is up/logged in.
   if tailscale status >/dev/null 2>&1; then
     log "host already on the tailnet — enabling Tailscale SSH only (other prefs untouched)"
-    tailscale set --ssh
+    tailscale set --ssh --accept-risk=lose-ssh
   else
     log "host not on the tailnet yet — running interactive 'tailscale up --ssh'"
     log "authenticate in the browser when the login URL appears"
-    tailscale up --ssh
+    tailscale up --ssh --accept-risk=lose-ssh
   fi
 }
 
