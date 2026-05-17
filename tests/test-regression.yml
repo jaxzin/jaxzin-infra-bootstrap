@@ -285,6 +285,11 @@
         src: "{{ roles_dir }}/gitea_runner/defaults/main.yml"
       register: runner_defaults_raw
 
+    - name: "CHECK 8: Read gitea_runner role tasks"
+      slurp:
+        src: "{{ roles_dir }}/gitea_runner/tasks/main.yml"
+      register: runner_tasks_raw
+
     - name: "CHECK 8: Read bootstrap-runner.sh"
       slurp:
         src: "{{ project_root }}/bootstrap-runner.sh"
@@ -305,6 +310,7 @@
         common_bootstrap: "{{ common_bootstrap_raw.content | b64decode }}"
         gitea_deploy: "{{ gitea_deploy_raw.content | b64decode }}"
         runner_defaults: "{{ runner_defaults_raw.content | b64decode }}"
+        runner_tasks: "{{ runner_tasks_raw.content | b64decode }}"
         bootstrap_runner: "{{ bootstrap_runner_raw.content | b64decode }}"
         runner_runbook: "{{ runner_runbook_raw.content | b64decode }}"
         readme: "{{ readme_raw.content | b64decode }}"
@@ -337,6 +343,25 @@
           connection:local a ~ path resolves to the CI container FS, not
           the host FS the runner container bind-mounts (the classic
           bind-source bug). See defaults/main.yml comment.
+
+    - name: "CHECK 8: Assert the registration token is minted in Play 1, not the role"
+      assert:
+        that:
+          # The CI container cannot reach the Gitea API. The role must NOT
+          # call the registration-token endpoint or carry an api-base-url
+          # knob; gitea-deploy.yml Play 1 mints it on the NAS (loopback)
+          # and passes it via hostvars (gitea_runner_registration_token).
+          - "'registration-token' not in runner_tasks"
+          - "'gitea_runner_api_base_url' not in runner_defaults"
+          - "'registration-token' in gitea_deploy"
+          - "'gitea_runner_registration_token' in gitea_deploy"
+        fail_msg: >
+          The runner registration token must be minted by gitea-deploy.yml
+          Play 1 on the NAS (working loopback admin API) and passed to
+          Play 2 via hostvars — the gitea_runner role must NOT call the
+          Gitea API itself (the CI container cannot resolve/reach it; this
+          was the root cause of the first co-located deploy failure). See
+          docs/runbooks/gitea-runner-host.md.
 
     - name: "CHECK 8: Assert bootstrap-runner.sh has NO Tailscale-SSH machinery"
       assert:

@@ -1,59 +1,34 @@
 ---
 # Deploy a Gitea Actions runner as a single socket-mounted container.
-# Host-agnostic by design — see defaults/main.yml and
-# docs/runbooks/gitea-runner-host.md for the host contract. This role runs
-# with become: false: every path below lives under the deploy user's own
-# data dir and Docker is reached via the user's `docker` group membership.
+# Host-agnostic. Runs in the CI job container via connection: local
+# (co-located with the bootstrap controller — see
+# docs/runbooks/gitea-runner-host.md), driving the HOST Docker daemon
+# through the bind-mounted socket.
+#
+# The runner registration token is NOT minted here. The CI container
+# cannot reach the Gitea admin API (Gitea HTTP is loopback-only on the
+# NAS; the tailnet URL is unresolvable from a non-tailnet container). It
+# is minted in gitea-deploy.yml Play 1 on the NAS (working loopback admin
+# API) and passed in via `gitea_runner_token` (hostvars) — the same
+# cross-play pattern the admin token uses.
+
+- name: Assert the runner registration token was provided by the deploy
+  assert:
+    that:
+      - gitea_runner_token is defined
+      - gitea_runner_token | string | length > 0
+    fail_msg: >-
+      gitea_runner_token is empty. It must be minted by gitea-deploy.yml
+      Play 1 on the NAS (loopback admin API) and passed to this play via
+      hostvars. This role deliberately does NOT call the Gitea API — the
+      CI container cannot reach it. See docs/runbooks/gitea-runner-host.md.
+    success_msg: "Runner registration token supplied by the deploy."
 
 - name: Ensure Gitea runner config directory exists
   file:
     path: "{{ gitea_runner_config_file_parent }}"
     state: directory
     mode: '0755'
-
-- name: Check if Gitea runner token is already persisted
-  stat:
-    path: "{{ gitea_runner_config_file_parent }}/runner_token.txt"
-  register: runner_token_file
-  check_mode: no # Don't skip this task in check mode
-
-- name: Load Gitea runner token from remote file if it exists
-  block:
-    - name: Read Gitea runner token from remote file
-      command: "cat {{ gitea_runner_config_file_parent }}/runner_token.txt"
-      register: runner_token_content
-      changed_when: false
-    - name: Set Gitea runner token fact
-      set_fact:
-        gitea_runner_token: "{{ runner_token_content.stdout | trim }}"
-  when: runner_token_file.stat.exists
-  check_mode: no # Don't skip this task in check mode
-
-- name: Generate and persist Gitea runner token if it does not exist
-  when: not runner_token_file.stat.exists
-  block:
-    # Minted over the tailnet instance URL (gitea_runner_api_base_url),
-    # reachable from this tailnet host — NOT the NAS-loopback API. The
-    # admin token (gitea_api_token) is provided by the caller; in the
-    # bootstrap deploy it comes from the gitea_server play via hostvars.
-    - name: Get Gitea runner registration token
-      uri:
-        url: "{{ gitea_runner_api_base_url }}/api/v1/admin/runners/registration-token"
-        method: GET
-        headers:
-          Authorization: "token {{ gitea_api_token }}"
-        validate_certs: "{{ gitea_runner_api_validate_certs }}"
-      register: new_runner_token_result
-
-    - name: Set runner token fact from new token
-      set_fact:
-        gitea_runner_token: "{{ new_runner_token_result.json.token }}"
-
-    - name: Persist the new runner token to the filesystem
-      copy:
-        content: "{{ gitea_runner_token }}"
-        dest: "{{ gitea_runner_config_file_parent }}/runner_token.txt"
-        mode: '0600'
 
 - name: Ensure Gitea runner config file exists
   template:

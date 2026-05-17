@@ -16,33 +16,22 @@ argument_specs:
   main:
     short_description: The main entry point for the gitea_runner role.
     options:
-      gitea_api_token:
+      gitea_runner_token:
         type: "str"
         required: true
         no_log: true
         description: >-
-          Gitea admin API token, used once to mint the runner registration
-          token. In the bootstrap deploy it is resolved via hostvars from
-          the gitea_server play; it is NOT a property of the runner host.
+          The Gitea Actions runner REGISTRATION token. Injected by the
+          deploy — minted in gitea-deploy.yml Play 1 on the NAS (loopback
+          admin API) and passed via hostvars. This role never calls the
+          Gitea API; the CI container cannot reach it.
       gitea_instance_url:
         type: "str"
         required: true
         description: >-
-          URL the runner connects to Gitea on (the tailnet Serve URL,
-          e.g. https://gitea.<tailnet>). The runner host must be able to
-          reach this — see expectation #3 in the role's host contract.
-      gitea_runner_api_base_url:
-        type: "str"
-        default: "{{ gitea_instance_url }}"
-        description: >-
-          Base URL the runner host uses to reach Gitea's admin API to mint
-          its registration token. Defaults to the tailnet instance URL
-          (reachable from the tailnet runner host) — deliberately NOT the
-          NAS-loopback gitea_api_base_url, which is meaningless here.
-      gitea_runner_api_validate_certs:
-        type: "bool"
-        default: true
-        description: "Validate TLS on the registration-token call (Serve certs are valid)."
+          URL the runner CONTAINER connects to Gitea on at runtime (the
+          tailnet Serve URL, e.g. https://gitea.<tailnet>), reached via
+          the host's kernel-mode Tailscale.
       gitea_runner_image:
         type: "str"
         default: "gitea/act_runner:0.2.12"

@@ -12,13 +12,14 @@
 # docs/runbooks/gitea-runner-host.md):
 #
 #   1. Linux with a running Docker Engine daemon.
-#   2. Reachable over SSH; the deploy connects as a user who is a member
-#      of the `docker` group. The runner play runs WITHOUT privilege
-#      escalation (become: false) — no sudo on the host is required.
-#   3. Tailscale running on the HOST (kernel mode) when tailnet access is
-#      required — it is here, because the runner registers with Gitea over
-#      the tailnet URL and CI jobs ssh to tailnet hosts. The runner gets
-#      tailnet reach from the host; this role deploys no Tailscale sidecar.
+#   2. The role runs in the CI job container via connection: local
+#      (co-located with the bootstrap controller), WITHOUT privilege
+#      escalation, driving the host Docker daemon via the bind-mounted
+#      socket — no sudo on the host is required.
+#   3. The HOST is a tailnet node (kernel mode) so the runner CONTAINER
+#      can reach Gitea / tailnet at runtime. This role deploys no
+#      Tailscale sidecar and never calls the Gitea API itself (the
+#      registration token is injected — see gitea_runner_token).
 #   4. A writable data directory for runner state (default below).
 #
 # Anything host-specific (paths, OS package management, kernel quirks) is
@@ -56,10 +57,7 @@ gitea_runner_name: >-
   {{ lookup('ansible.builtin.env', 'GITEA_RUNNER_NAME')
      | default('gitea-runner', true) }}
 
-# The runner host reaches Gitea's admin API to mint its registration token
-# over the tailnet (it is a tailnet node — expectation #3), NOT over the
-# NAS-loopback gitea_api_base_url, which is meaningless on this host.
-# Defaults to the tailnet instance URL. Certs are valid (Tailscale Serve
-# terminates TLS), so cert validation stays ON.
-gitea_runner_api_base_url: "{{ gitea_instance_url }}"
-gitea_runner_api_validate_certs: true
+# gitea_runner_token is REQUIRED and injected by the deploy (minted in
+# gitea-deploy.yml Play 1 on the NAS, passed via hostvars). This role does
+# NOT call the Gitea API to mint it — the CI container cannot reach the
+# Gitea API. No api-base-url / validate-certs knobs: there is no API call.

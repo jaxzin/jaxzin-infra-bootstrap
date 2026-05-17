@@ -102,6 +102,29 @@
       include_role:
         name: gitea_server
 
+    # Mint the Gitea Actions runner registration token HERE, on the NAS,
+    # where the loopback admin API (gitea_api_base_url = 127.0.0.1) is
+    # reachable and gitea_api_token is a fact from gitea_server. Play 2
+    # runs in the CI job container via connection:local and CANNOT reach
+    # the Gitea API (HTTP is loopback-only on the NAS; the tailnet URL is
+    # unresolvable from a non-tailnet container), so it must not call the
+    # API itself — it consumes this token via hostvars (same cross-play
+    # pattern as gitea_api_token). Gated to the GitHub bootstrap path.
+    - name: Mint Gitea runner registration token (NAS loopback admin API)
+      uri:
+        url: "{{ gitea_api_base_url }}/api/v1/admin/runners/registration-token"
+        method: GET
+        headers:
+          Authorization: "token {{ gitea_api_token }}"
+        validate_certs: no
+      register: runner_reg_token_result
+      when: not (lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true')
+
+    - name: Expose the runner registration token to Play 2
+      set_fact:
+        gitea_runner_registration_token: "{{ runner_reg_token_result.json.token }}"
+      when: not (lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true')
+
     - name: Configure Gitea Backups
       # NOTE: This is a static import, not an include.
       # It runs before the playbook starts regardless of the order
@@ -133,11 +156,11 @@
 #     runner config to a host path the runner container also sees.
 #
 # DR / steady-state: this play runs in the SAME ansible-playbook
-# invocation as Play 1, so the admin API token the gitea_server role just
-# provisioned is borrowed across plays via hostvars (the runner never
-# stores/mints it — it uses it once to get its own registration token).
-# Running the bootstrap deploy brings the runner online as part of
-# bootstrap; there is no separate "deploy the runner" step.
+# invocation as Play 1, so the runner REGISTRATION token that Play 1 just
+# minted on the NAS (loopback admin API) is borrowed across plays via
+# hostvars. The runner role never calls the Gitea API itself — the CI
+# container can't reach it. Running the bootstrap deploy brings the runner
+# online as part of bootstrap; there is no separate "deploy the runner" step.
 # ---------------------------------------------------------------------------
 - name: Deploy the Gitea Actions runner
   hosts: gitea_runner
@@ -147,7 +170,7 @@
   vars_files:
     - vars/main.yml
   vars:
-    gitea_api_token: "{{ hostvars[groups['nas'][0]].gitea_api_token }}"
+    gitea_runner_token: "{{ hostvars[groups['nas'][0]].gitea_runner_registration_token | default('') }}"
     # Skip runner provisioning when the deploy is triggered from inside
     # Gitea Actions (the github->gitea mirror flow); only the GitHub
     # bootstrap deploy provisions the runner.
