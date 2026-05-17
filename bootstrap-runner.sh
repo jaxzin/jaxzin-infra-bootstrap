@@ -91,11 +91,24 @@ ensure_tailscale_ssh() {
     curl -fsSL https://tailscale.com/install.sh | sh
   fi
   systemctl enable --now tailscaled
-  # Interactive on purpose: no --authkey. `tailscale up` prints a login
-  # URL the operator opens in a browser. --ssh exposes Tailscale SSH as
-  # the Ansible connection channel. Re-running reconciles state.
-  log "running 'tailscale up --ssh' — authenticate in the browser when prompted"
-  tailscale up --ssh
+  # Idempotent + SAFE on an already-configured tailnet node:
+  #   * Already logged in  -> `tailscale set --ssh` flips ONLY the SSH
+  #     preference and leaves every other pref (tags, routes, exit-node,
+  #     accept-dns, ...) untouched. A bare `tailscale up --ssh` would
+  #     instead reset unspecified prefs to defaults (or error), which
+  #     would clobber an existing node like a shared homelab host.
+  #   * Not logged in yet  -> interactive `tailscale up --ssh` (no
+  #     --authkey): prints a browser login URL for the operator. This
+  #     only happens on a genuinely fresh host.
+  # `tailscale status` exits 0 only when the node is up/logged in.
+  if tailscale status >/dev/null 2>&1; then
+    log "host already on the tailnet — enabling Tailscale SSH only (other prefs untouched)"
+    tailscale set --ssh
+  else
+    log "host not on the tailnet yet — running interactive 'tailscale up --ssh'"
+    log "authenticate in the browser when the login URL appears"
+    tailscale up --ssh
+  fi
 }
 
 print_summary() {
