@@ -20,9 +20,14 @@ The `gitea-deploy.yml` playbook automatically **configures and enables** a daily
 
 `gitea-deploy.yml` is **two plays in one invocation**: Play 1 provisions the Gitea server on the NAS; **Play 2 provisions the Gitea Actions runner on a *separate* dedicated Linux host** (see `docs/runbooks/gitea-runner-host.md`). Running the bootstrap workflow therefore brings the runner online *as part of bootstrap* — there is **no separate "deploy the runner" step** and no Gitea-side trigger to fire.
 
-### The single manual seed
+### The manual seeds
 
-Disaster recovery has exactly **one** irreducible manual step: bringing a self-hosted **GitHub** Actions runner online (the only thing allowed to use CI secrets directly, by design — it is the root of trust the rest of the chain hangs off). The Gitea runner is **not** a second manual seed: it is provisioned by Play 2 of the bootstrap deploy, over SSH, from the GitHub side. This is why moving the runner off the NAS *simplified* DR rather than complicating it.
+Disaster recovery has two irreducible, documented manual seeds — both are committed/version-controlled procedures, not improvisation:
+
+1. **The self-hosted GitHub Actions runner** online (the root of trust — the only thing allowed to use CI secrets directly). It **must itself be on the tailnet** (it connects to the runner host over Tailscale SSH — see below).
+2. **`bootstrap-runner.sh` run once on the Gitea runner host** (repo root; idempotent). This is the runner host's "first trust": it installs Docker + Tailscale, creates the deploy user, and runs interactive `tailscale up --ssh` (browser login — no `TS_AUTHKEY`, no SSH key). After this, the runner is **not** a separate deploy step — it is Play 2 of the ordinary bootstrap deploy, reached over Tailscale SSH.
+
+> **PREREQ (easy to miss):** the GitHub runner environment must be on the tailnet **and** the tailnet ACL must permit it to Tailscale-SSH the runner host as the deploy user. There is no SSH-key fallback by design. Full detail: `docs/runbooks/gitea-runner-host.md`.
 
 ### Recovery Method 1: Automated GitHub Action (Recommended)
 
@@ -30,8 +35,8 @@ This is the primary and recommended method for disaster recovery. It uses GitHub
 
 **Prerequisites:**
 
-*   The self-hosted GitHub Actions runner online (the single manual seed above).
-*   The Gitea **runner host** available: a Linux box with Docker, reachable over SSH by a `docker`-group user, and on the tailnet. Its address/credentials come from the `GITEA_RUNNER_HOST` / `GITEA_RUNNER_SSH_USER` / `GITEA_RUNNER_SSH_KEY` CI secrets. Full contract: `docs/runbooks/gitea-runner-host.md`.
+*   The self-hosted GitHub Actions runner online **and on the tailnet** (seed 1 above).
+*   The Gitea **runner host** seeded once with `sudo ./bootstrap-runner.sh` (seed 2 above) — a Linux box that, after the seed, has Docker, a `docker`-group deploy user, and Tailscale SSH. CI needs only `GITEA_RUNNER_HOST` (Secret: the host's tailnet MagicDNS name) and `GITEA_RUNNER_SSH_USER` (Variable: the deploy user). **No SSH key.** Full contract: `docs/runbooks/gitea-runner-host.md`.
 
 **Recovery Steps:**
 
@@ -46,9 +51,9 @@ This method should only be used if GitHub Actions is unavailable or the automate
 **Prerequisites:**
 
 *   A new NAS host with Ansible and Docker installed.
-*   A **separate** runner host satisfying `docs/runbooks/gitea-runner-host.md` (Linux + Docker, SSH-by-key as a `docker`-group user, on the tailnet).
+*   A **separate** runner host seeded with `sudo ./bootstrap-runner.sh` (see `docs/runbooks/gitea-runner-host.md`), and a control machine that is on the tailnet and ACL-permitted to Tailscale-SSH it.
 *   A local checkout of this repository.
-*   A valid Ansible inventory file defining **both** a `[nas]` group and a `[gitea_runner]` group (the latter with `ansible_ssh_private_key_file` for the runner host's key).
+*   A valid Ansible inventory file defining **both** a `[nas]` group and a `[gitea_runner]` group (the latter targeting the runner host's tailnet MagicDNS name; connection is Tailscale SSH — no key file).
 *   The following environment variables must be set:
     *   `B2_BUCKET_NAME`
     *   `B2_APPLICATION_KEY_ID`

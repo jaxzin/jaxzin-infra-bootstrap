@@ -258,6 +258,70 @@
           {{ rendered_runner_config }}
 
     # ================================================================
+    # Check 8: runner channel is Tailscale SSH (no managed SSH key) and
+    #          the GitHub-runner-on-tailnet prereq is documented
+    # ================================================================
+    # Locks in the operator-approved design: the runner host is reached
+    # over Tailscale SSH, NOT a provisioned SSH key, and the easy-to-miss
+    # prereq (the CI/GitHub runner must itself be on the tailnet, ACL
+    # permitting) is explicitly written down. See bootstrap-runner.sh +
+    # docs/runbooks/gitea-runner-host.md.
+    - name: "CHECK 8: Read common-bootstrap workflow"
+      slurp:
+        src: "{{ project_root }}/.github/workflows/common-bootstrap.yml"
+      register: common_bootstrap_raw
+
+    - name: "CHECK 8: Decode common-bootstrap workflow"
+      set_fact:
+        common_bootstrap: "{{ common_bootstrap_raw.content | b64decode }}"
+
+    - name: "CHECK 8: Assert NO managed-SSH-key wiring for the runner host"
+      assert:
+        that:
+          - "'GITEA_RUNNER_SSH_KEY' not in common_bootstrap"
+          - "'ansible_ssh_private_key_file' not in common_bootstrap"
+        fail_msg: >
+          common-bootstrap.yml reintroduced a managed SSH key for the
+          runner host. The approved design connects over Tailscale SSH
+          (no key). See docs/runbooks/gitea-runner-host.md.
+
+    - name: "CHECK 8: Read the runner-host runbook"
+      slurp:
+        src: "{{ project_root }}/docs/runbooks/gitea-runner-host.md"
+      register: runner_runbook_raw
+
+    - name: "CHECK 8: Decode the runner-host runbook"
+      set_fact:
+        runner_runbook: "{{ runner_runbook_raw.content | b64decode }}"
+
+    - name: "CHECK 8: Assert the GitHub-runner-on-tailnet prereq is documented"
+      assert:
+        that:
+          - "'PREREQUISITES' in runner_runbook"
+          - "'on the tailnet' in runner_runbook"
+          - "'Tailscale SSH' in runner_runbook"
+          - "'tailnet ACL' in runner_runbook"
+        fail_msg: >
+          gitea-runner-host.md must prominently document the prereq that
+          the GitHub self-hosted runner is on the tailnet and the tailnet
+          ACL permits CI->host Tailscale SSH. This prereq has no script
+          enforcement, so the docs are the only guard.
+
+    - name: "CHECK 8: Assert bootstrap-runner.sh exists and is the seed"
+      stat:
+        path: "{{ project_root }}/bootstrap-runner.sh"
+      register: bootstrap_runner_stat
+
+    - name: "CHECK 8: Assert bootstrap-runner.sh is present + executable"
+      assert:
+        that:
+          - bootstrap_runner_stat.stat.exists
+          - bootstrap_runner_stat.stat.executable
+        fail_msg: >
+          bootstrap-runner.sh (the documented one-time runner-host seed)
+          is missing or not executable.
+
+    # ================================================================
     # Cleanup
     # ================================================================
     - name: Clean up rendered test files
