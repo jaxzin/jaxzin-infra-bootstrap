@@ -118,27 +118,32 @@
         - backup_config
 
 # ---------------------------------------------------------------------------
-# Play 2: Gitea Actions runner — a SEPARATE host from the NAS.
+# Play 2: Gitea Actions runner — co-located with the bootstrap controller,
+# NOT on the Synology NAS.
 #
-# The runner is intentionally decoupled from the Synology NAS play above. It
-# targets the `gitea_runner` inventory group (host + creds injected from
-# their own CI secrets — the group is never named after a specific host in
-# this repo). The host contract is documented in
-# docs/runbooks/gitea-runner-host.md; the only hard expectations are: Linux
-# + Docker, SSH-by-key as a `docker`-group user (hence become: false), and
-# host-level Tailscale for tailnet reach.
+# Documented topology contract (docs/runbooks/gitea-runner-host.md):
+#   * The self-hosted GitHub Actions runner (this controller) and the
+#     Gitea runner are the SAME machine, so this play uses
+#     `connection: local` — there is NO ssh / Tailscale SSH / key.
+#   * That machine is NOT the DSM/NAS (the NAS is Play 1's target;
+#     decoupled on purpose).
+#   * The CI job bind-mounts the host Docker socket + the runner data dir
+#     (see .github/workflows/common-bootstrap.yml), so the role — running
+#     in the CI container — drives the HOST Docker daemon and writes the
+#     runner config to a host path the runner container also sees.
 #
-# DR / steady-state: this play runs in the SAME ansible-playbook invocation
-# as Play 1, so the admin API token the gitea_server role just provisioned
-# is borrowed across plays via hostvars (the runner host never stores or
-# mints it — it only uses it once to obtain its own registration token).
-# Running the bootstrap deploy therefore brings the runner online as part
-# of bootstrap; there is no separate "deploy the runner" step.
+# DR / steady-state: this play runs in the SAME ansible-playbook
+# invocation as Play 1, so the admin API token the gitea_server role just
+# provisioned is borrowed across plays via hostvars (the runner never
+# stores/mints it — it uses it once to get its own registration token).
+# Running the bootstrap deploy brings the runner online as part of
+# bootstrap; there is no separate "deploy the runner" step.
 # ---------------------------------------------------------------------------
 - name: Deploy the Gitea Actions runner
   hosts: gitea_runner
+  connection: local # co-located with the controller — see contract above
   become: false
-  gather_facts: true # need ansible_user_dir for the default data path
+  gather_facts: false
   vars_files:
     - vars/main.yml
   vars:

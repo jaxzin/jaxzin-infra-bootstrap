@@ -12,6 +12,16 @@ jobs:
     runs-on: [self-hosted, linux]
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
+      # Static (NO secret refs) so it is valid at workflow-load time.
+      # Play 2 of gitea-deploy.yml runs in THIS container via
+      # connection:local and drives the co-located HOST Docker daemon:
+      # mount the host docker socket so `community.docker.docker_container`
+      # creates the runner on the host, and mount the runner data dir at
+      # the SAME path so the config the role writes here is the exact
+      # bytes the host bind-mounts into the runner container. Trust
+      # posture (CI gets host-Docker authority on this machine) is
+      # documented in docs/runbooks/gitea-runner-host.md.
+      options: -v /var/run/docker.sock:/var/run/docker.sock -v /opt/gitea-runner:/opt/gitea-runner
       # NOTE: do NOT add `options: --dns ${{ secrets.LAN_DNS }}` here.
       # GitHub Actions evaluates `container.options` at workflow-load time,
       # before any of `secrets`, `inputs.<workflow_call-input>`-passed-from-
@@ -89,14 +99,13 @@ jobs:
             echo "Ansible is already available on the PATH."
           fi
 
-      # The Gitea runner is a SEPARATE host, reached over TAILSCALE SSH
-      # (not a managed SSH key — see docs/runbooks/gitea-runner-host.md and
-      # bootstrap-runner.sh). GITEA_RUNNER_HOST is the host's tailnet
-      # MagicDNS name (kept a Secret because it contains the tailnet).
-      # PREREQ: this self-hosted runner is itself on the tailnet and the
-      # tailnet ACL permits it to Tailscale-SSH the runner host as the
-      # deploy user. `accept-new` avoids a first-connect host-key hang
-      # (Tailscale SSH presents its own rotating host key).
+      # The Gitea runner is CO-LOCATED with this controller (same machine,
+      # NOT the DSM — see docs/runbooks/gitea-runner-host.md). Play 2 uses
+      # connection:local, so the [gitea_runner] inventory entry needs no
+      # ssh user/args; ansible_connection=local is explicit here as the
+      # operator-boundary statement of the topology. GITEA_RUNNER_HOST is
+      # kept only as a human-readable inventory label (the tailnet name);
+      # GITEA_RUNNER_SSH_USER is no longer used.
       - name: Deploy infrastructure
         id: deploy
         uses: dawidd6/action-ansible-playbook@v4
@@ -112,6 +121,6 @@ jobs:
             [nas]
             ${{ secrets.NAS_HOST }} ansible_user="${{ secrets.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
             [gitea_runner]
-            ${{ secrets.GITEA_RUNNER_HOST }} ansible_user="${{ vars.GITEA_RUNNER_SSH_USER }}" ansible_ssh_common_args="-o StrictHostKeyChecking=accept-new"
+            ${{ secrets.GITEA_RUNNER_HOST }} ansible_connection=local
           requirements: galaxy-requirements.yml
           options: ${{ inputs.dry_run && '--check --diff' || '' }}

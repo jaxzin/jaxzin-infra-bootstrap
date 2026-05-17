@@ -25,13 +25,19 @@
 # the caller's concern, injected via the variables below — never hardcoded
 # in this role.
 
-# Where the runner keeps its registration + config + cache. Defaults to a
-# dot-dir in the deploy user's home so the role needs neither root nor a
-# host-specific volume path. Override via the GITEA_RUNNER_DATA_PATH CI
-# variable if the host has a dedicated data mount.
+# Where the runner keeps its registration + config + cache. This is a
+# FIXED HOST path, never a per-user ~ dir: in the co-located bootstrap
+# topology the role runs in the CI container (connection: local) and
+# writes here, while the HOST Docker daemon bind-mounts this SAME host
+# path into the runner container. The CI job bind-mounts this exact path
+# and bootstrap-runner.sh provisions it, so the bytes are coherent across
+# both. A ~ path would resolve to the CI container's filesystem, not the
+# host's (the classic bind-source-resolution bug). Override via the
+# GITEA_RUNNER_DATA_PATH CI variable; if you change it, change the CI
+# job's bind-mount in .github/workflows/common-bootstrap.yml to match.
 gitea_runner_data_path: >-
   {{ lookup('ansible.builtin.env', 'GITEA_RUNNER_DATA_PATH')
-     | default(ansible_user_dir ~ '/.gitea-runner', true) }}
+     | default('/opt/gitea-runner', true) }}
 
 gitea_runner_config_file_parent: "{{ gitea_runner_data_path }}/conf"
 gitea_runner_config_file: "{{ gitea_runner_config_file_parent }}/config.yml"

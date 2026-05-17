@@ -54,8 +54,12 @@ argument_specs:
       gitea_runner_data_path:
         type: "str"
         description: >-
-          Host directory for runner state. Defaults to ~/.gitea-runner of
-          the deploy user (no root, no host-specific volume path).
+          FIXED host directory for runner state (default /opt/gitea-runner).
+          Never a ~ path: the role runs in the CI container (connection:
+          local) and the host Docker daemon bind-mounts this same host
+          path into the runner container, so it must be coherent across
+          both (the CI job bind-mounts it; bootstrap-runner.sh provisions
+          it).
       gitea_runner_config_file_parent:
         type: "str"
         default: "{{ gitea_runner_data_path }}/conf"

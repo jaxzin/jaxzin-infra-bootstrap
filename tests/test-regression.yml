@@ -258,70 +258,129 @@
           {{ rendered_runner_config }}
 
     # ================================================================
-    # Check 8: runner channel is Tailscale SSH (no managed SSH key) and
-    #          the GitHub-runner-on-tailnet prereq is documented
+    # Check 8: co-located / local-connection bootstrap contract
     # ================================================================
-    # Locks in the operator-approved design: the runner host is reached
-    # over Tailscale SSH, NOT a provisioned SSH key, and the easy-to-miss
-    # prereq (the CI/GitHub runner must itself be on the tailnet, ACL
-    # permitting) is explicitly written down. See bootstrap-runner.sh +
-    # docs/runbooks/gitea-runner-host.md.
+    # Locks in the operator-approved design after the Tailscale-SSH
+    # approach was dropped: the GitHub self-hosted runner and the Gitea
+    # runner are the SAME machine (not the DSM, not a laptop); Play 2
+    # connects LOCALLY; the CI job bind-mounts the host docker socket +
+    # the fixed data dir; bootstrap-runner.sh carries NO Tailscale-SSH
+    # machinery; and the unenforceable same-machine/not-DSM/not-laptop
+    # prereq is prominently documented in BOTH the runbook and the README
+    # (the user explicitly required the README warning so the GitHub
+    # runner is never installed on a Mac "to go fast"). Docs are the only
+    # guard for the prereq, so they are asserted here.
     - name: "CHECK 8: Read common-bootstrap workflow"
       slurp:
         src: "{{ project_root }}/.github/workflows/common-bootstrap.yml"
       register: common_bootstrap_raw
 
-    - name: "CHECK 8: Decode common-bootstrap workflow"
-      set_fact:
-        common_bootstrap: "{{ common_bootstrap_raw.content | b64decode }}"
+    - name: "CHECK 8: Read gitea-deploy playbook"
+      slurp:
+        src: "{{ project_root }}/playbooks/gitea-deploy.yml"
+      register: gitea_deploy_raw
 
-    - name: "CHECK 8: Assert NO managed-SSH-key wiring for the runner host"
-      assert:
-        that:
-          - "'GITEA_RUNNER_SSH_KEY' not in common_bootstrap"
-          - "'ansible_ssh_private_key_file' not in common_bootstrap"
-          # GITEA_RUNNER_SSH_USER is a Variable (not sensitive), so it
-          # must be read as vars.*, never secrets.* — a mismatch yields an
-          # empty ansible_user and a silently broken inventory.
-          - "'vars.GITEA_RUNNER_SSH_USER' in common_bootstrap"
-          - "'secrets.GITEA_RUNNER_SSH_USER' not in common_bootstrap"
-        fail_msg: >
-          common-bootstrap.yml either reintroduced a managed SSH key for
-          the runner host (approved design is keyless Tailscale SSH) or
-          reads GITEA_RUNNER_SSH_USER from secrets.* instead of vars.*
-          (it is a Variable; secrets.* would render empty). See
-          docs/runbooks/gitea-runner-host.md.
+    - name: "CHECK 8: Read gitea_runner role defaults"
+      slurp:
+        src: "{{ roles_dir }}/gitea_runner/defaults/main.yml"
+      register: runner_defaults_raw
+
+    - name: "CHECK 8: Read bootstrap-runner.sh"
+      slurp:
+        src: "{{ project_root }}/bootstrap-runner.sh"
+      register: bootstrap_runner_raw
 
     - name: "CHECK 8: Read the runner-host runbook"
       slurp:
         src: "{{ project_root }}/docs/runbooks/gitea-runner-host.md"
       register: runner_runbook_raw
 
-    - name: "CHECK 8: Decode the runner-host runbook"
-      set_fact:
-        runner_runbook: "{{ runner_runbook_raw.content | b64decode }}"
+    - name: "CHECK 8: Read the README"
+      slurp:
+        src: "{{ project_root }}/README.md"
+      register: readme_raw
 
-    - name: "CHECK 8: Assert the GitHub-runner-on-tailnet prereq is documented"
+    - name: "CHECK 8: Decode all CHECK 8 sources"
+      set_fact:
+        common_bootstrap: "{{ common_bootstrap_raw.content | b64decode }}"
+        gitea_deploy: "{{ gitea_deploy_raw.content | b64decode }}"
+        runner_defaults: "{{ runner_defaults_raw.content | b64decode }}"
+        bootstrap_runner: "{{ bootstrap_runner_raw.content | b64decode }}"
+        runner_runbook: "{{ runner_runbook_raw.content | b64decode }}"
+        readme: "{{ readme_raw.content | b64decode }}"
+
+    - name: "CHECK 8: Assert local-connection wiring (no SSH key, no Tailscale SSH)"
       assert:
         that:
-          - "'PREREQUISITES' in runner_runbook"
-          - "'on the tailnet' in runner_runbook"
-          - "'Tailscale SSH' in runner_runbook"
-          - "'tailnet ACL' in runner_runbook"
-          # The accept-vs-check gotcha (hit empirically): CI needs an
-          # `accept` ssh rule; `check` forces interactive browser re-auth
-          # that non-interactive CI cannot satisfy.
-          - "'browser re-auth' in runner_runbook"
-          - "'non-interactive' in runner_runbook"
+          - "'GITEA_RUNNER_SSH_KEY' not in common_bootstrap"
+          - "'ansible_ssh_private_key_file' not in common_bootstrap"
+          - "'ansible_connection=local' in common_bootstrap"
+          - "'/var/run/docker.sock:/var/run/docker.sock' in common_bootstrap"
+          - "'/opt/gitea-runner:/opt/gitea-runner' in common_bootstrap"
+          - "'connection: local' in gitea_deploy"
         fail_msg: >
-          gitea-runner-host.md must prominently document the prereq that
-          the GitHub self-hosted runner is on the tailnet AND that its
-          tailnet ssh ACL rule is action:accept (not check, which forces
-          interactive browser re-auth that non-interactive CI cannot do).
-          This prereq has no script enforcement, so the docs are the only
-          guard.
+          The co-located/local bootstrap wiring regressed:
+          common-bootstrap.yml must use `ansible_connection=local` for
+          [gitea_runner], bind-mount the host docker socket + the
+          /opt/gitea-runner data dir into the CI job, carry no SSH-key
+          wiring, and gitea-deploy.yml Play 2 must be `connection: local`.
+          See docs/runbooks/gitea-runner-host.md.
 
-    - name: "CHECK 8: Assert bootstrap-runner.sh exists and is the seed"
+    - name: "CHECK 8: Assert fixed host data path (no per-user ~ / ansible_user_dir)"
+      assert:
+        that:
+          - "'/opt/gitea-runner' in runner_defaults"
+          - "'ansible_user_dir' not in runner_defaults"
+        fail_msg: >
+          gitea_runner data path must be a FIXED host path
+          (/opt/gitea-runner), never ansible_user_dir/~ — under
+          connection:local a ~ path resolves to the CI container FS, not
+          the host FS the runner container bind-mounts (the classic
+          bind-source bug). See defaults/main.yml comment.
+
+    - name: "CHECK 8: Assert bootstrap-runner.sh has NO Tailscale-SSH machinery"
+      assert:
+        that:
+          # Contiguous active-command forms (not bare '--ssh', which the
+          # explanatory comments legitimately mention).
+          - "'tailscale up --ssh' not in bootstrap_runner"
+          - "'tailscale set --ssh' not in bootstrap_runner"
+          - "'accept-risk' not in bootstrap_runner"
+          - "'confirm_ssh_enable' not in bootstrap_runner"
+          - "'BOOTSTRAP_RUNNER_ASSUME_YES' not in bootstrap_runner"
+          - "'ensure_data_dir' in bootstrap_runner"
+          - "'tailscale up' in bootstrap_runner"
+        fail_msg: >
+          bootstrap-runner.sh must not enable/manage Tailscale SSH
+          (no `tailscale up/set --ssh`, no accept-risk, no confirm hatch —
+          the connection is local now) and must provision the runner data
+          dir (ensure_data_dir) + ensure plain tailnet membership
+          (`tailscale up`). See docs/runbooks/gitea-runner-host.md.
+
+    - name: "CHECK 8: Assert the same-machine / not-DSM / not-laptop prereq is documented"
+      assert:
+        that:
+          # Runbook: prominent, unenforceable prereq.
+          - "'PREREQUISITES' in runner_runbook"
+          # Single-line phrases (the source is hard-wrapped, so multi-word
+          # asserts must not straddle a line break).
+          - "'GitHub runner host == the Gitea runner host' in runner_runbook"
+          - "'Synology DSM' in runner_runbook"
+          - "'laptop' in runner_runbook"
+          - "'no SSH, no Tailscale SSH, no key' in runner_runbook"
+          # README: the user explicitly required the warning here so the
+          # GitHub runner is never installed on a Mac to go fast.
+          - "'co-located' in readme"
+          - "'NOT your laptop' in readme"
+          - "'host the Gitea runner' in readme"
+        fail_msg: >
+          The same-machine / NOT-the-DSM / NOT-a-laptop co-location
+          prereq must be prominently documented in BOTH
+          docs/runbooks/gitea-runner-host.md and README.md (no script
+          enforces it). The README warning is a hard requirement so the
+          GitHub runner is never installed on a Mac "to go fast".
+
+    - name: "CHECK 8: Assert bootstrap-runner.sh exists and is executable"
       stat:
         path: "{{ project_root }}/bootstrap-runner.sh"
       register: bootstrap_runner_stat

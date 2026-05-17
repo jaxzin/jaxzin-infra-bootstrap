@@ -4,156 +4,150 @@
 
 The rest of this repo provisions a Synology DSM NAS and is, by necessity,
 tightly coupled to that host. **The Gitea Actions runner is deliberately
-*not*.** It was moved off the NAS onto a separate, dedicated Linux host so
-the entire class of NAS/dind/Tailscale-sidecar bugs (Gitea #25,
-`fallen-leaf/ansible-runner-image#15`) is removed by architecture rather
-than patched.
+*not*.** It was moved off the NAS so the entire class of NAS/dind/
+Tailscale-sidecar bugs (Gitea #25, `fallen-leaf/ansible-runner-image#15`)
+is removed by architecture rather than patched.
 
-The `gitea_runner` role depends only on the **host contract** below. If a
-host satisfies it, the role works; the role must never grow a
-host-specific assumption again. Regression lock-in:
-`tests/check_docker_tasks.py` Check H, `tests/test-regression.yml`
-CHECK 7 + CHECK 8.
+The `gitea_runner` role depends only on the **host contract** below.
+Regression lock-in: `tests/check_docker_tasks.py` Check H,
+`tests/test-regression.yml` CHECK 7 + CHECK 8.
 
 ---
 
 ## ⚠️ PREREQUISITES — read first
 
-These live **outside** the runner host, are **not** checked by any script,
-and the whole design fails silently without them:
+The whole design fails (silently or confusingly) if these are wrong. None
+are enforced by a script — the docs are the only guard:
 
-1. **The machine that runs the bootstrap workflow (the self-hosted
-   GitHub Actions runner) MUST itself be on the tailnet** and able to
-   reach the runner host over **Tailscale SSH**. Ansible Play 2 connects
-   to the runner host *as* this CI environment — if it has no tailnet
-   path, the deploy cannot connect. There is no SSH-key fallback by
-   design.
+1. **The self-hosted GitHub Actions runner MUST be installed on the SAME
+   machine you want the Gitea runner on.** The bootstrap deploy connects
+   to the Gitea runner host with a **local connection** (Play 2 is
+   `connection: local`) — there is no SSH, no Tailscale SSH, no key
+   between them *because they are the same box*. Register the GitHub
+   self-hosted runner on that host.
 
-2. **The tailnet ACL `ssh` rule for the CI identity MUST be
-   `action: "accept"`, NOT `action: "check"`.** `tailscale up --ssh` on
-   the host only *exposes* SSH; the tailnet `ssh` ACL rule is what
-   *authorizes* the session. `action: "check"` forces a periodic
-   **interactive browser re-auth** — fine for a human logging in, but a
-   non-interactive GitHub-runner→host Ansible connection has no browser
-   and will hang/fail. The rule covering `src` = the CI runner's tailnet
-   identity, `dst` = the runner host, `users` = the deploy user must be
-   `action: "accept"`. Without a matching rule the connection is refused;
-   with a `check` rule it stalls. (You will *see* `check` behavior when
-   you personally SSH in — that does not mean CI will work; CI needs an
-   `accept` rule for its own identity.)
+2. **Do NOT register the GitHub self-hosted runner on your laptop/Mac**
+   "just to get things up quickly." It must be Linux (it runs a Linux
+   job container), and co-located with the Gitea runner. A laptop runner
+   breaks the local-connection topology and won't have the host Docker /
+   data-dir mounts the deploy needs.
 
-If either is missing, fix it before running the bootstrap workflow.
+3. **That machine must NOT be the Synology DSM/NAS.** The NAS is Play 1's
+   target and is deliberately decoupled from the runner; running the
+   runner on the DSM reintroduces the whole NAS/dind problem class this
+   work removed.
+
+4. **That machine must be a tailnet node (kernel-mode Tailscale).** This
+   is so the runner *container* can reach Gitea over the tailnet and CI
+   jobs can `ssh` tailnet hosts. Plain tailnet membership only — **not**
+   Tailscale SSH; nothing in this design uses Tailscale SSH or a tailnet
+   `ssh` ACL.
+
+In short: **the GitHub runner host == the Gitea runner host == a
+tailnet-joined Linux box that is not the DSM and not your laptop.**
 
 ---
 
 ## Host contract (the only things the role assumes)
 
-1. **Linux with a running Docker Engine daemon.** Any distro. Not dind —
-   the runner bind-mounts the host's `/var/run/docker.sock`; job
-   containers run on the host's own Docker daemon.
+1. **Linux with a running Docker Engine daemon.** Not dind — the runner
+   bind-mounts the host's `/var/run/docker.sock`; job containers run on
+   the host's own Docker daemon.
 
-2. **A deploy user in the `docker` group.** Ansible Play 2 runs
-   `become: false`: no sudo on this host. (`bootstrap-runner.sh` creates
-   the user and adds it to `docker`.)
+2. **A deploy user in the `docker` group.** (`bootstrap-runner.sh`
+   creates the user and adds it.)
 
-3. **Host-level Tailscale, with Tailscale SSH enabled.** The runner
-   reaches Gitea over the tailnet Serve URL and CI jobs `ssh` to tailnet
-   hosts; the host gets tailnet reach itself (kernel mode). The role
-   deploys **no Tailscale sidecar** and uses plain `network_mode:
-   bridge`. The Ansible connection channel is **Tailscale SSH** — there
-   is no managed SSH keypair anywhere in this design.
+3. **A tailnet node (kernel mode).** For the runner container's egress to
+   Gitea/tailnet — not for the Ansible connection (that is local).
 
-4. **A writable data directory.** Defaults to `~/.gitea-runner` of the
-   deploy user (no root, no host-specific volume path). Override with the
-   `GITEA_RUNNER_DATA_PATH` CI variable.
+4. **A fixed, writable data directory** (default `/opt/gitea-runner`).
+   This exact host path is bind-mounted into the CI job *and* into the
+   runner container, so it must be coherent on the host —
+   `bootstrap-runner.sh` provisions it. Override via
+   `GITEA_RUNNER_DATA_PATH` (then update the CI job mount to match).
 
-5. **Outbound reachability to the Gitea instance URL** (the tailnet Serve
-   URL), for runner registration and job polling.
+5. **Outbound reachability to the Gitea tailnet URL**, for runner
+   registration and job polling.
 
-Anything else — OS family, package manager, kernel modules, filesystem
-layout — is **out of contract**. The role must not look at it.
+Anything else — OS family, package manager, kernel modules — is **out of
+contract**.
 
 ## The seed: `bootstrap-runner.sh`
 
-`bootstrap-runner.sh` (repo root) is the **single, documented manual
-seed** for this host — the irreducible "first trust" step. It is
-idempotent; it is also the disaster-recovery step for the runner host.
+`bootstrap-runner.sh` (repo root) is the **single documented manual
+seed** for this host. Idempotent; also the runner-host DR step.
 
 ```
 sudo ./bootstrap-runner.sh
 # optional: sudo GITEA_RUNNER_DEPLOY_USER=ci ./bootstrap-runner.sh
+# optional: sudo GITEA_RUNNER_DATA_PATH=/srv/gitea-runner ./bootstrap-runner.sh
 ```
 
 It installs Docker + Tailscale, creates the deploy user in the `docker`
-group, enables **Tailscale SSH** (interactive `tailscale up --ssh` browser
-login on a fresh host; `tailscale set --ssh` on an already-joined node, so
-existing tailnet prefs are untouched — **no `TS_AUTHKEY`, no SSH key**),
-and prints the values to put in CI. It stores no secrets.
-
-Before the Tailscale-SSH step — the one action that can drop your current
-session if you're connected over Tailscale — it **prompts for
-confirmation (default No)** so you can abort and re-run later (it is
-idempotent and resumes there). Run it from the host's local console to
-avoid the disconnect, or set `BOOTSTRAP_RUNNER_ASSUME_YES=1` for an
-unattended run.
+group, ensures the host is on the tailnet (interactive `tailscale up` —
+no `--ssh`, no `--authkey` — only if not already joined; it touches
+nothing on an already-joined node), and creates the data dir. It stores
+no secrets and never enables Tailscale SSH.
 
 ## Security trade-off (accept knowingly)
 
-Socket-mount gives every CI job container root-equivalent authority over
-the runner host's Docker daemon. This is acceptable **here and only
-here** — a single-tenant homelab where every workflow is trusted
-first-party IaC. It is the deliberate price of deleting the entire dind
-problem class; do not "fix" it by re-introducing dind.
+Two things give elevated authority on this one machine, both accepted for
+a single-tenant homelab of trusted first-party IaC:
+
+- **Socket-mount:** every CI job container has root-equivalent authority
+  over this host's Docker daemon (the deliberate price of deleting dind).
+- **CI gets the host Docker socket + data dir:** because the bootstrap
+  controller and the runner are the same box, the CI job bind-mounts
+  `/var/run/docker.sock` and `/opt/gitea-runner` from the host.
+
+Do not "fix" the first by re-introducing dind.
 
 ## CI configuration
 
-After `bootstrap-runner.sh`, set on the `jaxzin-infra-bootstrap` GitHub
-repo:
+After `bootstrap-runner.sh`:
 
 | Name | Kind | Purpose |
 |---|---|---|
-| `GITEA_RUNNER_HOST` | **Secret** | The host's tailnet MagicDNS name (Secret because it contains the tailnet). |
-| `GITEA_RUNNER_SSH_USER` | Variable | The deploy user (default `gitea-runner`). |
-| `GITEA_RUNNER_DATA_PATH` | Variable | *(optional)* Override `~/.gitea-runner`. |
+| `GITEA_RUNNER_HOST` | Secret | Only a human-readable inventory label now (the tailnet name). Kept a Secret as it contains the tailnet. |
+| `GITEA_RUNNER_DATA_PATH` | Variable | *(optional)* Override `/opt/gitea-runner` (also change the CI job mount + re-run the seed). |
 | `GITEA_RUNNER_IMAGE` | Variable | *(optional)* Override the act_runner image (default `gitea/act_runner:0.2.12`, **non-dind**). |
 | `GITEA_RUNNER_NAME` | Variable | *(optional)* Display name (default `gitea-runner`). |
 
-There is intentionally **no `GITEA_RUNNER_SSH_KEY`** — the channel is
-Tailscale SSH (see prerequisites).
+There is intentionally **no `GITEA_RUNNER_SSH_KEY`** and the connection is
+**local**, not SSH/Tailscale SSH. `GITEA_RUNNER_SSH_USER`, if you set it
+earlier, is now unused and can be deleted.
 
 ## How it deploys (and when)
 
-`playbooks/gitea-deploy.yml` is two plays:
+`playbooks/gitea-deploy.yml` is two plays in one invocation:
 
 - **Play 1 — `hosts: nas`, `become: true`:** Gitea server + its Tailscale
   sidecar (kernel mode for Serve), certbot, backups. Provisions the Gitea
   admin API token.
-- **Play 2 — `hosts: gitea_runner`, `become: false`:** the `gitea_runner`
-  role only, connecting over **Tailscale SSH**. It borrows the admin
-  token from Play 1 via `hostvars` (never stores/mints it — uses it once
-  to obtain the runner registration token, talking to Gitea over the
-  **tailnet** URL).
+- **Play 2 — `hosts: gitea_runner`, `connection: local`:** the
+  `gitea_runner` role only, running *in the CI job container on this same
+  host*, driving the host Docker daemon via the bind-mounted socket. It
+  borrows the admin token from Play 1 via `hostvars` (never stores/mints
+  it — uses it once to obtain the runner registration token over the
+  tailnet Gitea URL).
 
-Both plays run in the **same `ansible-playbook` invocation**, so the
-runner comes online *as part of bootstrap*. There is no separate "deploy
-the runner" step and no Gitea-side trigger — hence no self-redeploy
-circularity (the runner is always deployed *to* by the GitHub-side
-bootstrap over Tailscale SSH, never by a job on itself).
-
-Play 2 is skipped when triggered from inside Gitea Actions
+The runner comes online *as part of bootstrap*. No separate "deploy the
+runner" step, no Gitea-side trigger — hence no self-redeploy circularity
+(the runner is deployed *to* by the bootstrap run, never by a job on
+itself). Play 2 is skipped when triggered from inside Gitea Actions
 (`GITEA_ACTIONS=true`, the github→gitea mirror flow).
 
 ## First-boot / disaster recovery
 
-DR has exactly **one** manual seed: the self-hosted GitHub runner (the
-root of trust). For the runner host specifically the seed is
-`bootstrap-runner.sh` run once. The runner is **not** a second
-independent seed — after the host seed, it is Play 2 of the ordinary
-bootstrap deploy. See `DR_RECOVERY_GUIDE.md`.
+DR has exactly **one** manual seed: the self-hosted GitHub runner host
+(installed per the prerequisites), bootstrapped once with
+`bootstrap-runner.sh`. The Gitea runner is **not** a second independent
+seed — after the host seed it is just Play 2 of the ordinary bootstrap
+deploy. See `DR_RECOVERY_GUIDE.md`.
 
 ## Steady-state runner updates
 
 Changing the runner image/labels/config is an ordinary
 `jaxzin-infra-bootstrap` change: edit the role, re-run the bootstrap
-deploy. Updates flow GitHub-side over Tailscale SSH — the runner is never
-asked to redeploy itself.
+deploy. Updates flow through the bootstrap run on this host — the runner
+is never asked to redeploy itself.
