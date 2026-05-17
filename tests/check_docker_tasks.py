@@ -20,6 +20,9 @@ Checks:
      (network_mode: container, /volume1, daemon.json, ts-socks5,
      synology_dsm). Regression lock-in for the runner-on-a-generic-host
      rearchitecture — see docs/runbooks/gitea-runner-host.md.
+  J) runner image Dockerfile must pip-install the Docker SDK (`docker`):
+     gitea-deploy.yml Play 2 runs community.docker locally in this image
+     (connection: local, co-located with the Gitea runner)
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -342,6 +345,50 @@ def check_f_dockerfile_dns_tools(errors):
         )
 
 
+def check_j_dockerfile_docker_sdk(errors):
+    """Check J: the runner image must pip-install the Docker SDK
+    (`docker`).
+
+    gitea-deploy.yml Play 2 (gitea_runner) runs with connection: local
+    inside THIS image, co-located with the Gitea runner, and manages the
+    host Docker daemon via community.docker.docker_container — which
+    imports the `docker` Python SDK (and its `requests` dep). There is no
+    remote host whose Python supplies it. Without this the co-located
+    deploy fails: "Failed to import the required Python library
+    (requests)". Lock it in so a Dockerfile edit can't silently drop it
+    (see docs/runbooks/gitea-runner-host.md).
+    """
+    try:
+        with open(DOCKERFILE_PATH) as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        errors.append(f"{DOCKERFILE_PATH}: File not found")
+        return
+
+    # Same scoping trick as Check F: collapse `\`-newline continuations,
+    # then pull the args of each pip/pip3 install command (up to the next
+    # `&&` or newline) so a `docker` mention elsewhere can't false-pass.
+    joined = text.replace("\\\n", " ")
+    pip_args = " ".join(re.findall(r"pip3?\s+install\b([^&\n]*)", joined))
+    if not pip_args.strip():
+        errors.append(
+            f"{DOCKERFILE_PATH}: expected a `pip install` layer; none found"
+        )
+        return
+
+    # Token's distribution name is the part before any version specifier.
+    names = {re.split(r"[=<>!~]", tok)[0] for tok in pip_args.split()}
+    if "docker" not in names:
+        errors.append(
+            f"{DOCKERFILE_PATH}: the Docker SDK for Python (`docker`) is "
+            f"not pip-installed; community.docker.docker_container needs it "
+            f"because gitea-deploy.yml Play 2 runs locally in this image "
+            f"(connection: local, co-located with the Gitea runner) and "
+            f"manages the host Docker daemon. See "
+            f"docs/runbooks/gitea-runner-host.md."
+        )
+
+
 def check_g_tailscale_authkey_failfast(errors):
     """Check G: the tailscale_sidecar role must fail fast on an
     expired/revoked TS_AUTHKEY with an actionable message AND assert a
@@ -447,6 +494,10 @@ def main():
     # Run check H: gitea_runner must stay host-agnostic + socket-mounted
     # (runner-on-a-generic-host rearchitecture lock-in)
     check_h_gitea_runner_socket_mount(errors)
+
+    # Run check J: runner image must pip-install the Docker SDK (Play 2
+    # runs community.docker locally in this image)
+    check_j_dockerfile_docker_sdk(errors)
 
     # Report results
     for w in warnings:
