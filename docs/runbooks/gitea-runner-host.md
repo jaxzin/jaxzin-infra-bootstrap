@@ -29,11 +29,18 @@ and the whole design fails silently without them:
    path, the deploy cannot connect. There is no SSH-key fallback by
    design.
 
-2. **The tailnet ACL policy MUST permit that CI identity to
-   Tailscale-SSH into the runner host as the deploy user.** `tailscale up
-   --ssh` on the host only *exposes* SSH; the tailnet `ssh` ACL rule is
-   what *authorizes* the CI→host session. Without the ACL rule the
-   connection is refused.
+2. **The tailnet ACL `ssh` rule for the CI identity MUST be
+   `action: "accept"`, NOT `action: "check"`.** `tailscale up --ssh` on
+   the host only *exposes* SSH; the tailnet `ssh` ACL rule is what
+   *authorizes* the session. `action: "check"` forces a periodic
+   **interactive browser re-auth** — fine for a human logging in, but a
+   non-interactive GitHub-runner→host Ansible connection has no browser
+   and will hang/fail. The rule covering `src` = the CI runner's tailnet
+   identity, `dst` = the runner host, `users` = the deploy user must be
+   `action: "accept"`. Without a matching rule the connection is refused;
+   with a `check` rule it stalls. (You will *see* `check` behavior when
+   you personally SSH in — that does not mean CI will work; CI needs an
+   `accept` rule for its own identity.)
 
 If either is missing, fix it before running the bootstrap workflow.
 

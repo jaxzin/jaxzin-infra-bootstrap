@@ -301,11 +301,18 @@
           - "'on the tailnet' in runner_runbook"
           - "'Tailscale SSH' in runner_runbook"
           - "'tailnet ACL' in runner_runbook"
+          # The accept-vs-check gotcha (hit empirically): CI needs an
+          # `accept` ssh rule; `check` forces interactive browser re-auth
+          # that non-interactive CI cannot satisfy.
+          - "'browser re-auth' in runner_runbook"
+          - "'non-interactive' in runner_runbook"
         fail_msg: >
           gitea-runner-host.md must prominently document the prereq that
-          the GitHub self-hosted runner is on the tailnet and the tailnet
-          ACL permits CI->host Tailscale SSH. This prereq has no script
-          enforcement, so the docs are the only guard.
+          the GitHub self-hosted runner is on the tailnet AND that its
+          tailnet ssh ACL rule is action:accept (not check, which forces
+          interactive browser re-auth that non-interactive CI cannot do).
+          This prereq has no script enforcement, so the docs are the only
+          guard.
 
     - name: "CHECK 8: Assert bootstrap-runner.sh exists and is the seed"
       stat:

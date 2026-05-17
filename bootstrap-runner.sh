@@ -125,6 +125,19 @@ confirm_ssh_enable() {
   esac
 }
 
+# True when Tailscale SSH is ALREADY on (RunSSH pref). Lets a re-run
+# short-circuit: no scary disconnect prompt, no no-op `set`, just the
+# summary. Best-effort: if it can't tell, returns false and we fall
+# through to the (harmless) confirm+set path.
+tailscale_ssh_already_enabled() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  tailscale debug prefs 2>/dev/null | python3 -c \
+    'import sys,json
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get("RunSSH") else 1)' 2>/dev/null
+}
+
 ensure_tailscale_ssh() {
   if command -v tailscale >/dev/null 2>&1; then
     log "tailscale present: $(tailscale version | head -1)"
@@ -133,6 +146,11 @@ ensure_tailscale_ssh() {
     curl -fsSL https://tailscale.com/install.sh | sh
   fi
   systemctl enable --now tailscaled
+
+  if tailscale_ssh_already_enabled; then
+    log "Tailscale SSH already enabled — nothing to change (idempotent re-run)"
+    return 0
+  fi
 
   confirm_ssh_enable
 
