@@ -280,10 +280,17 @@
         that:
           - "'GITEA_RUNNER_SSH_KEY' not in common_bootstrap"
           - "'ansible_ssh_private_key_file' not in common_bootstrap"
+          # GITEA_RUNNER_SSH_USER is a Variable (not sensitive), so it
+          # must be read as vars.*, never secrets.* — a mismatch yields an
+          # empty ansible_user and a silently broken inventory.
+          - "'vars.GITEA_RUNNER_SSH_USER' in common_bootstrap"
+          - "'secrets.GITEA_RUNNER_SSH_USER' not in common_bootstrap"
         fail_msg: >
-          common-bootstrap.yml reintroduced a managed SSH key for the
-          runner host. The approved design connects over Tailscale SSH
-          (no key). See docs/runbooks/gitea-runner-host.md.
+          common-bootstrap.yml either reintroduced a managed SSH key for
+          the runner host (approved design is keyless Tailscale SSH) or
+          reads GITEA_RUNNER_SSH_USER from secrets.* instead of vars.*
+          (it is a Variable; secrets.* would render empty). See
+          docs/runbooks/gitea-runner-host.md.
 
     - name: "CHECK 8: Read the runner-host runbook"
       slurp:
