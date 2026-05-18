@@ -34,7 +34,7 @@ argument_specs:
           the host's kernel-mode Tailscale.
       gitea_runner_image:
         type: "str"
-        default: "gitea/act_runner:0.2.12"
+        default: "gitea/act_runner:0.6.1"
         description: "Plain (non-dind) act_runner image."
       gitea_runner_name:
         type: "str"

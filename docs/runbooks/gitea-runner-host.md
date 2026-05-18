@@ -110,7 +110,7 @@ After `bootstrap-runner.sh`:
 |---|---|---|
 | `GITEA_RUNNER_HOST` | Secret | Only a human-readable inventory label now (the tailnet name). Kept a Secret as it contains the tailnet. |
 | `GITEA_RUNNER_DATA_PATH` | Variable | *(optional)* Override `/opt/gitea-runner` (also change the CI job mount + re-run the seed). |
-| `GITEA_RUNNER_IMAGE` | Variable | *(optional)* Override the act_runner image (default `gitea/act_runner:0.2.12`, **non-dind**). |
+| `GITEA_RUNNER_IMAGE` | Variable | *(optional)* Override the act_runner image (default `gitea/act_runner:0.6.1`, **non-dind** — pinned for DR reproducibility; bump deliberately). |
 | `GITEA_RUNNER_NAME` | Variable | *(optional)* Display name (default `gitea-runner`). |
 
 There is intentionally **no `GITEA_RUNNER_SSH_KEY`** and the connection is
