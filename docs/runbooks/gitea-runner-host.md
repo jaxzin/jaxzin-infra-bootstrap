@@ -109,9 +109,9 @@ After `bootstrap-runner.sh`:
 | Name | Kind | Purpose |
 |---|---|---|
 | `GITEA_RUNNER_HOST` | Secret | Only a human-readable inventory label now (the tailnet name). Kept a Secret as it contains the tailnet. |
-| `GITEA_RUNNER_DATA_PATH` | Variable | *(optional)* Override `/opt/gitea-runner` (also change the CI job mount + re-run the seed). |
-| `GITEA_RUNNER_IMAGE` | Variable | *(optional)* Override the act_runner image (default `gitea/act_runner:0.2.12`, **non-dind**). |
-| `GITEA_RUNNER_NAME` | Variable | *(optional)* Display name (default `gitea-runner`). |
+| `GITEA_RUNNER_DATA_PATH` | Variable | *(optional)* Override the fixed host data dir (also change the CI job mount + re-run the seed). Pinned default: see the role's `playbooks/roles/gitea_runner/defaults/main.yml`. |
+| `GITEA_RUNNER_IMAGE` | Variable | *(optional)* Override the act_runner image (non-dind; pinned for DR reproducibility, bump deliberately). Pinned default: see `playbooks/roles/gitea_runner/defaults/main.yml`. |
+| `GITEA_RUNNER_NAME` | Variable | *(optional)* Override the runner's display name. Default: see `playbooks/roles/gitea_runner/defaults/main.yml`. |
 
 There is intentionally **no `GITEA_RUNNER_SSH_KEY`** and the connection is
 **local**, not SSH/Tailscale SSH. `GITEA_RUNNER_SSH_USER`, if you set it
