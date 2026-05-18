@@ -25,6 +25,11 @@
 # Anything host-specific (paths, OS package management, kernel quirks) is
 # the caller's concern, injected via the variables below — never hardcoded
 # in this role.
+#
+# THIS FILE IS THE SINGLE SOURCE OF TRUTH for gitea_runner default
+# VALUES. meta/main.yml documents type/usage only — Ansible arg-spec
+# default keys are doc-only (never applied at runtime), so restating a
+# value there would just drift. Do not duplicate these literals.
 
 # Where the runner keeps its registration + config + cache. This is a
 # FIXED HOST path, never a per-user ~ dir: in the co-located bootstrap
