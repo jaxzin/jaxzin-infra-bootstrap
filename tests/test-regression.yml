@@ -205,35 +205,20 @@
           consumers can opt into userspace mode.
 
     # ================================================================
-    # Check 7: gitea_runner config.yaml.j2 renders proxy env correctly
+    # Check 7: gitea_runner config.yaml.j2 renders host-agnostic +
+    #          socket-mount-clean (no NAS/dind/SOCKS fingerprints)
     # ================================================================
-    # End-to-end render of the Jinja2 template with synthetic but
-    # realistic values, then asserts on the resulting YAML. Catches both
-    # template-rendering regressions and proxy-env content drift (e.g.
-    # someone removes ALL_PROXY, swaps the port, or breaks NO_PROXY).
-    - name: "CHECK 7: Render gitea_runner config.yaml.j2 with synthetic vars"
+    # The runner moved off the NAS to a generic Linux Docker host
+    # (socket-mount, host-level Tailscale, no sidecar). The template is
+    # now fully static — this end-to-end render asserts the RENDERED
+    # artifact carries none of the retired proxy/SOCKS/dind/Synology
+    # surface and does carry the new socket-mount shape. Complements
+    # check_docker_tasks.py Check H (which greps source) by validating
+    # what actually ships. See docs/runbooks/gitea-runner-host.md.
+    - name: "CHECK 7: Render gitea_runner config.yaml.j2"
       template:
         src: "{{ roles_dir }}/gitea_runner/templates/config.yaml.j2"
         dest: /tmp/test-gitea-runner-config.yml
-      vars:
-        # Match the production var names so the template compiles without
-        # touching the real defaults/main.yml. The values are synthetic.
-        tailscale_runner_container_name: "tailscale-runner"
-        tailscale_runner_gitea_net_ip: "172.20.0.42"
-        lan_domain_suffix: ".lan.test.example"
-        # Job-container ssh->tailnet SOCKS5 mounts (Gitea #25). Synthetic
-        # host paths so the template renders without the real defaults.
-        gitea_runner_socks_helper_host_path: "/tmp/test/conf/ts-socks5"
-        gitea_runner_tailnet_ssh_config_host_path: "/tmp/test/conf/10-tailnet-proxy.conf"
-        # config.yaml.j2 mounts use the in-dind path (resolved in the
-        # gitea-runner container), not the host path. See defaults/main.yml.
-        gitea_runner_socks_helper_indind_path: "/data/conf/ts-socks5"
-        gitea_runner_tailnet_ssh_config_indind_path: "/data/conf/10-tailnet-proxy.conf"
-        gitea_runner_proxy_env:
-          HTTPS_PROXY: "http://tailscale-runner:1099"
-          HTTP_PROXY: "http://tailscale-runner:1099"
-          ALL_PROXY: "socks5://tailscale-runner:1055"
-          NO_PROXY: "localhost,127.0.0.1,docker,host.docker.internal,.lan.test.example,tailscale-runner,gitea-db,gitea-runner"
 
     - name: "CHECK 7: Read rendered gitea_runner config"
       slurp:
@@ -244,50 +229,195 @@
       set_fact:
         rendered_runner_config: "{{ rendered_runner_config_raw.content | b64decode }}"
 
-    - name: "CHECK 7: Assert HTTPS_PROXY uses the userspace HTTP CONNECT port"
+    - name: "CHECK 7: Assert NO retired NAS/dind/SOCKS fingerprints"
       assert:
         that:
-          - "'HTTPS_PROXY: \"http://tailscale-runner:1099\"' in rendered_runner_config"
+          - "'HTTPS_PROXY' not in rendered_runner_config"
+          - "'ALL_PROXY' not in rendered_runner_config"
+          - "'ts-socks5' not in rendered_runner_config"
+          - "'tailscale-runner' not in rendered_runner_config"
+          - "'10-tailnet-proxy.conf' not in rendered_runner_config"
+          - "'synology_dsm' not in rendered_runner_config"
+          - "'daemon.json' not in rendered_runner_config"
         fail_msg: >
-          Rendered runner config must export
-          HTTPS_PROXY=http://tailscale-runner:1099. Got:
+          Rendered runner config still carries a retired
+          proxy/SOCKS/dind/Synology fingerprint. The runner now runs on a
+          generic Linux host via socket-mount. Got:
           {{ rendered_runner_config }}
 
-    - name: "CHECK 7: Assert ALL_PROXY uses the userspace SOCKS5 port"
+    - name: "CHECK 7: Assert the socket-mount runner shape is present"
       assert:
         that:
-          - "'ALL_PROXY: \"socks5://tailscale-runner:1055\"' in rendered_runner_config"
+          # privileged is only needed for dind, which is gone.
+          - "'privileged: false' in rendered_runner_config"
+          - "'self-hosted' in rendered_runner_config"
+          - "'ubuntu-latest:docker://docker.gitea.com/runner-images:ubuntu-latest' in rendered_runner_config"
         fail_msg: >
-          Rendered runner config must export
-          ALL_PROXY=socks5://tailscale-runner:1055. Got:
+          Rendered runner config is missing the expected socket-mount
+          shape (privileged:false + the standard labels). Got:
           {{ rendered_runner_config }}
 
-    - name: "CHECK 7: Assert NO_PROXY exempts the LAN suffix and gitea-net peers"
-      assert:
-        that:
-          # LAN suffix from the test fixture (proves the variable is wired
-          # through the proxy-env dict, not hardcoded in the template).
-          - "'.lan.test.example' in rendered_runner_config"
-          # Real container short names that Docker DNS resolves on
-          # gitea-net (NOT the network name itself, which is a no-op).
-          - "'tailscale-runner,gitea-db,gitea-runner' in rendered_runner_config"
-        fail_msg: >
-          Rendered runner config NO_PROXY must include the LAN suffix
-          and gitea-net container short names. Got:
-          {{ rendered_runner_config }}
+    # ================================================================
+    # Check 8: co-located / local-connection bootstrap contract
+    # ================================================================
+    # Locks in the operator-approved design after the Tailscale-SSH
+    # approach was dropped: the GitHub self-hosted runner and the Gitea
+    # runner are the SAME machine (not the DSM, not a laptop); Play 2
+    # connects LOCALLY; the CI job bind-mounts the host docker socket +
+    # the fixed data dir; bootstrap-runner.sh carries NO Tailscale-SSH
+    # machinery; and the unenforceable same-machine/not-DSM/not-laptop
+    # prereq is prominently documented in BOTH the runbook and the README
+    # (the user explicitly required the README warning so the GitHub
+    # runner is never installed on a Mac "to go fast"). Docs are the only
+    # guard for the prereq, so they are asserted here.
+    - name: "CHECK 8: Read common-bootstrap workflow"
+      slurp:
+        src: "{{ project_root }}/.github/workflows/common-bootstrap.yml"
+      register: common_bootstrap_raw
 
-    - name: "CHECK 7: Assert add-host injection placeholder is documented"
+    - name: "CHECK 8: Read gitea-deploy playbook"
+      slurp:
+        src: "{{ project_root }}/playbooks/gitea-deploy.yml"
+      register: gitea_deploy_raw
+
+    - name: "CHECK 8: Read gitea_runner role defaults"
+      slurp:
+        src: "{{ roles_dir }}/gitea_runner/defaults/main.yml"
+      register: runner_defaults_raw
+
+    - name: "CHECK 8: Read gitea_runner role tasks"
+      slurp:
+        src: "{{ roles_dir }}/gitea_runner/tasks/main.yml"
+      register: runner_tasks_raw
+
+    - name: "CHECK 8: Read bootstrap-runner.sh"
+      slurp:
+        src: "{{ project_root }}/bootstrap-runner.sh"
+      register: bootstrap_runner_raw
+
+    - name: "CHECK 8: Read the runner-host runbook"
+      slurp:
+        src: "{{ project_root }}/docs/runbooks/gitea-runner-host.md"
+      register: runner_runbook_raw
+
+    - name: "CHECK 8: Read the README"
+      slurp:
+        src: "{{ project_root }}/README.md"
+      register: readme_raw
+
+    - name: "CHECK 8: Decode all CHECK 8 sources"
+      set_fact:
+        common_bootstrap: "{{ common_bootstrap_raw.content | b64decode }}"
+        gitea_deploy: "{{ gitea_deploy_raw.content | b64decode }}"
+        runner_defaults: "{{ runner_defaults_raw.content | b64decode }}"
+        runner_tasks: "{{ runner_tasks_raw.content | b64decode }}"
+        bootstrap_runner: "{{ bootstrap_runner_raw.content | b64decode }}"
+        runner_runbook: "{{ runner_runbook_raw.content | b64decode }}"
+        readme: "{{ readme_raw.content | b64decode }}"
+
+    - name: "CHECK 8: Assert local-connection wiring (no SSH key, no Tailscale SSH)"
       assert:
         that:
-          # The IP-injection lives in container.options (not envs), but
-          # the template should reference the variable so it renders
-          # under test. Asserts the var is consumed somewhere.
-          - "'172.20.0.42' in rendered_runner_config"
+          - "'GITEA_RUNNER_SSH_KEY' not in common_bootstrap"
+          - "'ansible_ssh_private_key_file' not in common_bootstrap"
+          - "'ansible_connection=local' in common_bootstrap"
+          - "'/var/run/docker.sock:/var/run/docker.sock' in common_bootstrap"
+          - "'/opt/gitea-runner:/opt/gitea-runner' in common_bootstrap"
+          - "'connection: local' in gitea_deploy"
         fail_msg: >
-          Rendered runner config must reference
-          tailscale_runner_gitea_net_ip (deploy-time IP injection for
-          dind-spawned job containers). Got:
-          {{ rendered_runner_config }}
+          The co-located/local bootstrap wiring regressed:
+          common-bootstrap.yml must use `ansible_connection=local` for
+          [gitea_runner], bind-mount the host docker socket + the
+          /opt/gitea-runner data dir into the CI job, carry no SSH-key
+          wiring, and gitea-deploy.yml Play 2 must be `connection: local`.
+          See docs/runbooks/gitea-runner-host.md.
+
+    - name: "CHECK 8: Assert fixed host data path (no per-user ~ / ansible_user_dir)"
+      assert:
+        that:
+          - "'/opt/gitea-runner' in runner_defaults"
+          - "'ansible_user_dir' not in runner_defaults"
+        fail_msg: >
+          gitea_runner data path must be a FIXED host path
+          (/opt/gitea-runner), never ansible_user_dir/~ — under
+          connection:local a ~ path resolves to the CI container FS, not
+          the host FS the runner container bind-mounts (the classic
+          bind-source bug). See defaults/main.yml comment.
+
+    - name: "CHECK 8: Assert the registration token is minted in Play 1, not the role"
+      assert:
+        that:
+          # The CI container cannot reach the Gitea API. The role must NOT
+          # call the registration-token endpoint or carry an api-base-url
+          # knob; gitea-deploy.yml Play 1 mints it on the NAS (loopback)
+          # and passes it via hostvars (gitea_runner_registration_token).
+          - "'registration-token' not in runner_tasks"
+          - "'gitea_runner_api_base_url' not in runner_defaults"
+          - "'registration-token' in gitea_deploy"
+          - "'gitea_runner_registration_token' in gitea_deploy"
+        fail_msg: >
+          The runner registration token must be minted by gitea-deploy.yml
+          Play 1 on the NAS (working loopback admin API) and passed to
+          Play 2 via hostvars — the gitea_runner role must NOT call the
+          Gitea API itself (the CI container cannot resolve/reach it; this
+          was the root cause of the first co-located deploy failure). See
+          docs/runbooks/gitea-runner-host.md.
+
+    - name: "CHECK 8: Assert bootstrap-runner.sh has NO Tailscale-SSH machinery"
+      assert:
+        that:
+          # Contiguous active-command forms (not bare '--ssh', which the
+          # explanatory comments legitimately mention).
+          - "'tailscale up --ssh' not in bootstrap_runner"
+          - "'tailscale set --ssh' not in bootstrap_runner"
+          - "'accept-risk' not in bootstrap_runner"
+          - "'confirm_ssh_enable' not in bootstrap_runner"
+          - "'BOOTSTRAP_RUNNER_ASSUME_YES' not in bootstrap_runner"
+          - "'ensure_data_dir' in bootstrap_runner"
+          - "'tailscale up' in bootstrap_runner"
+        fail_msg: >
+          bootstrap-runner.sh must not enable/manage Tailscale SSH
+          (no `tailscale up/set --ssh`, no accept-risk, no confirm hatch —
+          the connection is local now) and must provision the runner data
+          dir (ensure_data_dir) + ensure plain tailnet membership
+          (`tailscale up`). See docs/runbooks/gitea-runner-host.md.
+
+    - name: "CHECK 8: Assert the same-machine / not-DSM / not-laptop prereq is documented"
+      assert:
+        that:
+          # Runbook: prominent, unenforceable prereq.
+          - "'PREREQUISITES' in runner_runbook"
+          # Single-line phrases (the source is hard-wrapped, so multi-word
+          # asserts must not straddle a line break).
+          - "'GitHub runner host == the Gitea runner host' in runner_runbook"
+          - "'Synology DSM' in runner_runbook"
+          - "'laptop' in runner_runbook"
+          - "'no SSH, no Tailscale SSH, no key' in runner_runbook"
+          # README: the user explicitly required the warning here so the
+          # GitHub runner is never installed on a Mac to go fast.
+          - "'co-located' in readme"
+          - "'NOT your laptop' in readme"
+          - "'host the Gitea runner' in readme"
+        fail_msg: >
+          The same-machine / NOT-the-DSM / NOT-a-laptop co-location
+          prereq must be prominently documented in BOTH
+          docs/runbooks/gitea-runner-host.md and README.md (no script
+          enforces it). The README warning is a hard requirement so the
+          GitHub runner is never installed on a Mac "to go fast".
+
+    - name: "CHECK 8: Assert bootstrap-runner.sh exists and is executable"
+      stat:
+        path: "{{ project_root }}/bootstrap-runner.sh"
+      register: bootstrap_runner_stat
+
+    - name: "CHECK 8: Assert bootstrap-runner.sh is present + executable"
+      assert:
+        that:
+          - bootstrap_runner_stat.stat.exists
+          - bootstrap_runner_stat.stat.executable
+        fail_msg: >
+          bootstrap-runner.sh (the documented one-time runner-host seed)
+          is missing or not executable.
 
     # ================================================================
     # Cleanup

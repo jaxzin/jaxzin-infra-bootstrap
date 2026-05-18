@@ -1,8 +1,21 @@
 # Tailscale Sidecar Networking Modes
 
+> **Status (2026-05-16): the runner sidecar has been retired.** The Gitea
+> Actions runner was moved off the NAS onto a dedicated Linux Tailscale
+> host and is now socket-mounted with **no sidecar at all** (it reaches
+> the tailnet through that host's own Tailscale). This removed the entire
+> userspace-proxy / SOCKS / dind-DNS problem class by architecture rather
+> than working around it. See `docs/runbooks/gitea-runner-host.md`.
+>
+> Everything below is retained as the **record of why** the userspace +
+> proxy approach existed and why the namespace-share footgun matters. It
+> now applies only to the **Gitea** sidecar (still kernel mode, because
+> Tailscale Serve needs the kernel TUN device). Treat the runner-sidecar
+> sections as historical.
+
 ## Context
 
-This repo deploys two Tailscale sidecars: one in front of Gitea, one in front of the Gitea Actions runner. They look symmetric, but they use **two different Tailscale networking modes** because their service profiles are different. The choice has non-obvious blast radius: when in doubt, the wrong choice usually shows up as "containers can reach tailnet but not LAN" — or vice versa.
+Historically this repo deployed two Tailscale sidecars: one in front of Gitea, one in front of the Gitea Actions runner. They looked symmetric, but they used **two different Tailscale networking modes** because their service profiles differed. The choice has non-obvious blast radius: when in doubt, the wrong choice usually shows up as "containers can reach tailnet but not LAN" — or vice versa. Only the Gitea sidecar remains (kernel mode); the runner sidecar is gone (see the status banner above).
 
 This doc captures the trade-off so future reviewers don't have to re-discover it.
 

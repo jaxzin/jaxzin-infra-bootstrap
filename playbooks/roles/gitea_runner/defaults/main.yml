@@ -1,73 +1,63 @@
 ---
+# =============================================================================
+# gitea_runner role — host contract
+# =============================================================================
+# This role deploys a Gitea Actions runner as a single, socket-mounted
+# container. It makes NO assumptions about the host OS. It is deliberately
+# decoupled from the rest of this repo (which targets a Synology DSM NAS):
+# the runner can run on any Linux Docker host.
+#
+# Top-level expectations of the target host (the full contract — and the
+# only things this role depends on — are documented in
+# docs/runbooks/gitea-runner-host.md):
+#
+#   1. Linux with a running Docker Engine daemon.
+#   2. The role runs in the CI job container via connection: local
+#      (co-located with the bootstrap controller), WITHOUT privilege
+#      escalation, driving the host Docker daemon via the bind-mounted
+#      socket — no sudo on the host is required.
+#   3. The HOST is a tailnet node (kernel mode) so the runner CONTAINER
+#      can reach Gitea / tailnet at runtime. This role deploys no
+#      Tailscale sidecar and never calls the Gitea API itself (the
+#      registration token is injected — see gitea_runner_token).
+#   4. A writable data directory for runner state (default below).
+#
+# Anything host-specific (paths, OS package management, kernel quirks) is
+# the caller's concern, injected via the variables below — never hardcoded
+# in this role.
 
-# Container resource limits
-gitea_runner_memory_limit: "512m"
-gitea_runner_memory_swap: "1024m"
-
+# Where the runner keeps its registration + config + cache. This is a
+# FIXED HOST path, never a per-user ~ dir: in the co-located bootstrap
+# topology the role runs in the CI container (connection: local) and
+# writes here, while the HOST Docker daemon bind-mounts this SAME host
+# path into the runner container. The CI job bind-mounts this exact path
+# and bootstrap-runner.sh provisions it, so the bytes are coherent across
+# both. A ~ path would resolve to the CI container's filesystem, not the
+# host's (the classic bind-source-resolution bug). Override via the
+# GITEA_RUNNER_DATA_PATH CI variable; if you change it, change the CI
+# job's bind-mount in .github/workflows/common-bootstrap.yml to match.
+gitea_runner_data_path: >-
+  {{ lookup('ansible.builtin.env', 'GITEA_RUNNER_DATA_PATH')
+     | default('/opt/gitea-runner', true) }}
 
 gitea_runner_config_file_parent: "{{ gitea_runner_data_path }}/conf"
 gitea_runner_config_file: "{{ gitea_runner_config_file_parent }}/config.yml"
 
-# Inner dind dockerd storage driver. Pinned (not auto-detected) because on
-# the Synology DSM kernel dockerd's auto-probe fails overlay2 ("no such
-# device") then fuse-overlayfs ("not found") before falling back to btrfs;
-# every dockerd (re)start re-runs that fragile probe and a job container
-# landing mid-probe crashloops (Gitea fallen-leaf/ansible-runner-image#15).
-# btrfs is what the probe empirically settles on and what the Synology
-# volume backing the runner's /var/lib/docker supports — pin it so dockerd
-# goes straight there instead of cycling through the broken drivers.
-gitea_runner_storage_driver: "btrfs"
-gitea_runner_dind_daemon_json: "{{ gitea_runner_config_file_parent }}/daemon.json"
+# Plain (NON-dind) act_runner. dind is gone: job containers are spawned on
+# the host's own Docker daemon via the bind-mounted docker socket, which
+# removes the entire nested-dind problem class (storage-driver probe,
+# zombie subreaping, dind-DNS gap, certs-volume mismatch).
+gitea_runner_image: >-
+  {{ lookup('ansible.builtin.env', 'GITEA_RUNNER_IMAGE')
+     | default('gitea/act_runner:0.2.12', true) }}
 
-# Proxy env shared between the runner container itself (tasks/main.yml `env:`)
-# and the runner config that propagates the same env to every job container
-# (templates/config.yaml.j2 `runner.envs:`). Single source of truth so the
-# two surfaces can't drift.
-#
-# - 1099: Tailscale userspace HTTP CONNECT proxy listen port
-#   (TS_OUTBOUND_HTTP_PROXY_LISTEN); used by HTTP/HTTPS clients that honor
-#   *_PROXY env vars.
-# - 1055: Tailscale userspace SOCKS5 proxy listen port (TS_SOCKS5_SERVER);
-#   used by clients that speak SOCKS5 (e.g. tools driven by ALL_PROXY).
-#
-# NO_PROXY lists actual container short-names on gitea-net (which embedded
-# Docker DNS resolves) plus the LAN domain suffix so LAN hostnames bypass
-# the tailnet proxy and egress directly via the host's LAN interface.
-# Network names like "gitea-net" are NOT valid here — NO_PROXY matches
-# hostnames/IPs, not Docker network identifiers.
-gitea_runner_proxy_env:
-  HTTPS_PROXY: "http://{{ tailscale_runner_container_name }}:1099"
-  HTTP_PROXY:  "http://{{ tailscale_runner_container_name }}:1099"
-  ALL_PROXY:   "socks5://{{ tailscale_runner_container_name }}:1055"
-  NO_PROXY:    "localhost,127.0.0.1,docker,host.docker.internal,{{ lan_domain_suffix }},tailscale-runner,gitea-db,gitea-runner"
+# Display name the runner registers under. Host-neutral default; override
+# per host via the GITEA_RUNNER_NAME CI variable if you run more than one.
+gitea_runner_name: >-
+  {{ lookup('ansible.builtin.env', 'GITEA_RUNNER_NAME')
+     | default('gitea-runner', true) }}
 
-# --- Tailnet ssh path for dind job containers (Gitea #25) ---
-# `ssh` does NOT honor *_PROXY, so the proxy env above does not help jobs
-# that ssh to tailnet hosts (e.g. obsidian-mcp deploying to gaming.<tailnet>).
-# Post-userspace-refactor the job container has no tailnet route AND no
-# MagicDNS — gaming.<tailnet> resolves to public junk. Fix: give ssh a
-# ProxyCommand through the sidecar's SOCKS5 server, which (being on the
-# tailnet) does the MagicDNS resolution AND the routing. The upstream job
-# image (docker.gitea.com/runner-images:ubuntu-latest) ships no SOCKS
-# client, so we bind-mount a static `socat` + an ssh_config.d snippet into
-# every job container via config.yaml.j2 container.options.
-#
-# socat is fetched (pinned URL + sha256) rather than vendored as a binary
-# in git. Both MUST be set by the operator to a trusted static build (it
-# runs inside every CI job container) — see
-# docs/runbooks/job-container-tailnet-ssh.md. No default URL on purpose:
-# guessing a binary download is a supply-chain risk.
-gitea_runner_socks_helper_url: "{{ lookup('ansible.builtin.env', 'GITEA_RUNNER_SOCKS_HELPER_URL') | default('', true) }}"
-gitea_runner_socks_helper_sha256: "{{ lookup('ansible.builtin.env', 'GITEA_RUNNER_SOCKS_HELPER_SHA256') | default('', true) }}"
-gitea_runner_socks_helper_host_path: "{{ gitea_runner_config_file_parent }}/ts-socks5"
-gitea_runner_tailnet_ssh_config_host_path: "{{ gitea_runner_config_file_parent }}/10-tailnet-proxy.conf"
-# The *_host_path values above are NAS-host paths — correct for the
-# Ansible get_url/template tasks that create the files. But the
-# config.yaml.j2 container.options `-v` SOURCE is resolved by the inner
-# dind dockerd, whose filesystem IS the gitea-runner container, where the
-# conf dir is the host's gitea_runner_data_path mounted at /data (proven
-# by CONFIG_FILE=/data/conf/config.yml and the /certs/client precedent).
-# So the job-container mount source must be the in-runner path, NOT the
-# host path. Using the host path makes dind auto-create an empty dir.
-gitea_runner_socks_helper_indind_path: "/data/conf/ts-socks5"
-gitea_runner_tailnet_ssh_config_indind_path: "/data/conf/10-tailnet-proxy.conf"
+# gitea_runner_token is REQUIRED and injected by the deploy (minted in
+# gitea-deploy.yml Play 1 on the NAS, passed via hostvars). This role does
+# NOT call the Gitea API to mint it — the CI container cannot reach the
+# Gitea API. No api-base-url / validate-certs knobs: there is no API call.
