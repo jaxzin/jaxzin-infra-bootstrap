@@ -137,6 +137,33 @@
         b2_bucket_name: "{{ lookup('ansible.builtin.env', 'B2_BUCKET_NAME') }}"
         b2_application_key_id: "{{ lookup('ansible.builtin.env', 'B2_APPLICATION_KEY_ID') }}"
         b2_application_key: "{{ lookup('ansible.builtin.env', 'B2_APPLICATION_KEY') }}"
+        # OpenBao token file for the OIDC-source self-heal (optional/graceful:
+        # if GITEA_OIDC_RECONCILE_BAO_TOKEN is unset the env file is skipped).
+        gitea_oidc_reconcile_bao_addr: "{{ lookup('ansible.builtin.env', 'OPENBAO_ADDR') }}"
+        gitea_oidc_reconcile_bao_token: "{{ lookup('ansible.builtin.env', 'GITEA_OIDC_RECONCILE_BAO_TOKEN') }}"
+      tags:
+        - backup_config
+
+    - name: Self-heal Gitea OAuth2 source after deploy (best-effort, non-blocking)
+      # Re-asserts the authentik source so drift can't silently strip
+      # admin/ownership (2026-05-19 incident). failed_when:false because
+      # Gitea is tier-1 / DR-first — a reconcile failure must NEVER fail the
+      # deploy. Skips cleanly until jaxzin-auth installs the reconcile script.
+      ansible.builtin.shell: |
+        set -euo pipefail
+        S="{{ gitea_data_path }}/scripts/reconcile-gitea-oauth2.sh"
+        E="{{ gitea_data_path }}/scripts/gitea_oidc_reconcile.env"
+        if [ -x "$S" ] && [ -f "$E" ]; then
+          set -a; . "$E"; set +a
+          "$S"
+        else
+          echo "OIDC reconcile script/env not present yet — skipping (expected until jaxzin-auth installs it)."
+        fi
+      args:
+        executable: /bin/bash
+      become: true
+      failed_when: false
+      changed_when: false
       tags:
         - backup_config
 

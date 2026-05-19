@@ -420,6 +420,53 @@
           is missing or not executable.
 
     # ================================================================
+    # Check 12: Gitea OIDC source self-heals on restart + deploy,
+    #           non-blocking / DR-safe (2026-05-19 silent-drift incident)
+    # ================================================================
+    - name: "CHECK 12: Read OIDC self-heal sources"
+      slurp:
+        src: "{{ item }}"
+      register: oidc_selfheal_raw
+      loop:
+        - "{{ roles_dir }}/gitea_backup/tasks/main.yml"
+        - "{{ roles_dir }}/gitea_backup/templates/gitea_dump.sh.j2"
+        - "{{ roles_dir }}/gitea_backup/templates/gitea_oidc_reconcile.env.j2"
+        - "{{ project_root }}/playbooks/gitea-deploy.yml"
+
+    - name: "CHECK 12: Decode sources"
+      set_fact:
+        oidc_gb_tasks: "{{ oidc_selfheal_raw.results[0].content | b64decode }}"
+        oidc_dump_tpl: "{{ oidc_selfheal_raw.results[1].content | b64decode }}"
+        oidc_env_tpl: "{{ oidc_selfheal_raw.results[2].content | b64decode }}"
+        oidc_deploy: "{{ oidc_selfheal_raw.results[3].content | b64decode }}"
+
+    - name: "CHECK 12: Assert the OIDC reconcile env is provisioned securely"
+      assert:
+        that:
+          - "'gitea_oidc_reconcile.env.j2' in oidc_gb_tasks"
+          - "'gitea_oidc_reconcile.env' in oidc_gb_tasks"
+          - "'BAO_TOKEN' in oidc_env_tpl"
+          - "'TS_TAILNET' in oidc_env_tpl"
+        fail_msg: >
+          gitea_backup must provision gitea_oidc_reconcile.env (root 0600,
+          no_log) from gitea_oidc_reconcile.env.j2 carrying BAO_TOKEN +
+          TS_TAILNET, so the on-restart self-heal can authenticate to OpenBao.
+
+    - name: "CHECK 12: Assert restart + deploy self-heal is wired and NON-blocking"
+      assert:
+        that:
+          - "'reconcile-gitea-oauth2.sh' in oidc_dump_tpl"
+          - "'gitea_oidc_reconcile.env' in oidc_dump_tpl"
+          - "'(#oidc)' in oidc_dump_tpl"
+          - "'reconcile-gitea-oauth2.sh' in oidc_deploy"
+          - "'failed_when: false' in oidc_deploy"
+        fail_msg: >
+          The Gitea OAuth2 source self-heal must run after the post-dump
+          restart (gitea_dump.sh.j2 cleanup, marked (#oidc)) AND after a
+          stack deploy (gitea-deploy.yml, failed_when: false) so it never
+          blocks Gitea (tier-1/DR-first) from coming up.
+
+    # ================================================================
     # Cleanup
     # ================================================================
     - name: Clean up rendered test files
