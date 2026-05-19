@@ -31,6 +31,19 @@ cleanup() {
   fi
   echo "INFO: Ensuring Gitea container is started..."
   docker start "$GITEA_CONTAINER_NAME" &>/dev/null
+
+  # (#oidc) Best-effort self-heal of the Gitea OAuth2 source after the
+  # restart, so config drift (e.g. the group-claim field blanking) can't
+  # silently strip admin/ownership again. NON-blocking by design: Gitea is
+  # tier-1 / DR-first, so a reconcile failure here must never matter, and
+  # the script (installed out-of-band by jaxzin-auth) may be absent.
+  if [ -x "$HOST_DATA_DIR/scripts/reconcile-gitea-oauth2.sh" ] \
+     && [ -f "$HOST_DATA_DIR/scripts/gitea_oidc_reconcile.env" ]; then
+    echo "INFO: self-healing Gitea OAuth2 source post-restart (best-effort)..."
+    ( set -a; . "$HOST_DATA_DIR/scripts/gitea_oidc_reconcile.env"; set +a; \
+      "$HOST_DATA_DIR/scripts/reconcile-gitea-oauth2.sh" ) \
+      || echo "WARN: OIDC source reconcile skipped/failed (non-fatal)."
+  fi
 }
 
 # --- Script Body ---
