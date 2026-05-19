@@ -478,6 +478,95 @@
           potentially OIDC back-channel calls. (2026-05-25 incident)
 
     # ================================================================
+    # Check 10: gitea_backup schedules ONE canonical weekly dump and
+    #           reconciles (purges) stale/legacy cron entries (#106)
+    # ================================================================
+    # tafeen.synology.syno_crontab is `lineinfile state=present` with a
+    # literal line and NO regexp — structurally append-only. A schedule
+    # change cannot remove the prior entry (verified root cause of the
+    # double Monday run). The role MUST purge any existing gitea_dump.sh
+    # /etc/crontab line before (re)adding the single canonical schedule:
+    # 05:00 America/New_York, Tuesdays.
+    - name: "CHECK 10: Read gitea_backup tasks/main.yml"
+      slurp:
+        src: "{{ roles_dir }}/gitea_backup/tasks/main.yml"
+      register: gitea_backup_tasks_raw
+
+    - name: "CHECK 10: Decode gitea_backup tasks"
+      set_fact:
+        gitea_backup_tasks: "{{ gitea_backup_tasks_raw.content | b64decode }}"
+
+    - name: "CHECK 10: Assert stale cron entries are reconciled before scheduling"
+      assert:
+        that:
+          - "'state: absent' in gitea_backup_tasks"
+          - "'/etc/crontab' in gitea_backup_tasks"
+          - "'Reconcile: remove any legacy/duplicate Gitea backup cron entries' in gitea_backup_tasks"
+          - "'Schedule Gitea dump and B2 upload script' not in gitea_backup_tasks"
+        fail_msg: >
+          gitea_backup/tasks/main.yml must purge any existing
+          gitea_dump.sh line from /etc/crontab (lineinfile state=absent
+          keyed on the script path) BEFORE scheduling — the upstream
+          syno_crontab role is append-only and cannot reconcile a
+          schedule change (root cause of the double Monday run, #106).
+
+    - name: "CHECK 10: Assert exactly one canonical schedule — 05:00 ET Tuesdays"
+      assert:
+        that:
+          - "'05:00 America/New_York, Tuesdays' in gitea_backup_tasks"
+          - "'weekday:' in gitea_backup_tasks"
+          - "gitea_backup_tasks.count('name: tafeen.synology.syno_crontab') == 1"
+        fail_msg: >
+          gitea_backup must schedule exactly one weekly dump at
+          05:00 America/New_York on Tuesdays (hour 5, weekday 2) via a
+          single syno_crontab import, and no longer the old 02:00 (#106).
+
+    # ================================================================
+    # Check 11: gitea_dump.sh.j2 never writes B2 credentials to the log
+    #           and carries no dead error-handling (#108)
+    # ================================================================
+    - name: "CHECK 11: Read gitea_dump.sh.j2"
+      slurp:
+        src: "{{ roles_dir }}/gitea_backup/templates/gitea_dump.sh.j2"
+      register: gitea_dump_tpl_raw
+
+    - name: "CHECK 11: Decode gitea_dump.sh.j2"
+      set_fact:
+        gitea_dump_tpl: "{{ gitea_dump_tpl_raw.content | b64decode }}"
+
+    - name: "CHECK 11: Assert credentials are never logged + log is locked down"
+      assert:
+        that:
+          - "'umask 077' in gitea_dump_tpl"
+          - "'chmod 600' in gitea_dump_tpl"
+          - "'hardening(#108):' in gitea_dump_tpl"
+          - "'(#108) silence' in gitea_dump_tpl"
+          - "'DUMP_EXIT_CODE' not in gitea_dump_tpl"
+        fail_msg: >
+          gitea_dump.sh.j2 must: set `umask 077` and `chmod 600` the log
+          so it is not world-readable; suppress the `b2 account authorize`
+          output so the application key never reaches the shared log
+          (marked `(#108) silence`); and drop the unreachable
+          DUMP_EXIT_CODE check (dead under set -euo pipefail) (#108).
+
+    # ================================================================
+    # Check 12: the offsite upload does NOT run inside the Gitea
+    #           offline window — Gitea is restarted right after the
+    #           dump tarball is created, before the upload (#110)
+    # ================================================================
+    - name: "CHECK 12: Assert Gitea is brought back online before the upload"
+      assert:
+        that:
+          - "'# (#110) Gitea back online here' in gitea_dump_tpl"
+          - "'b2 file upload' in gitea_dump_tpl"
+          - "gitea_dump_tpl.index('# (#110) Gitea back online here') < gitea_dump_tpl.index('b2 file upload')"
+        fail_msg: >
+          gitea_dump.sh.j2 must restart the Gitea container immediately
+          after the dump tarball is created and BEFORE the offsite
+          upload (marker `# (#110) Gitea back online here`), so the
+          ~40-min upload no longer runs inside the offline window (#110).
+
+    # ================================================================
     # Cleanup
     # ================================================================
     - name: Clean up rendered test files

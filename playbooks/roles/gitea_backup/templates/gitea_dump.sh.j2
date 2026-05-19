@@ -35,6 +35,14 @@ cleanup() {
 
 # --- Script Body ---
 
+# hardening(#108): the dump log must never be world-readable, and B2
+# credentials must never be written to it (see the silenced
+# `b2 account authorize` below). umask must be set before the log is
+# created/opened by the exec redirect.
+umask 077
+touch "$LOG_FILE"
+chmod 600 "$LOG_FILE"
+
 # Redirect all stdout and stderr to the log file.
 exec >> "$LOG_FILE" 2>&1
 
@@ -68,21 +76,32 @@ docker stop "$GITEA_CONTAINER_NAME"
 DUMP_FILENAME="gitea-dump-$(date +%Y-%m-%d-%H%M%S).tar.gz"
 HOST_DUMP_FILE="$HOST_TEMP_DUMP_DIR/$DUMP_FILENAME"
 echo "INFO: Creating Gitea dump. Logs from the dump process will follow:"
-docker run --rm --name gitea-dump-temp --network "$GITEA_NETWORK_NAME" -u "$GITEA_USER_ID" \
+# Under `set -euo pipefail` a failing `docker run` already aborts the
+# script (the EXIT trap then restarts Gitea); the old explicit
+# exit-code check here was unreachable dead code (#108). Make the
+# failure path explicit instead.
+if ! docker run --rm --name gitea-dump-temp --network "$GITEA_NETWORK_NAME" -u "$GITEA_USER_ID" \
   --memory="1g" --memory-swap="1g" \
   -v "$GITEA_DATA_VOLUME" -v "$GITEA_APP_INI_VOLUME" -v "$GITEA_SECRETS_VOLUME" -v "$HOST_TEMP_DUMP_DIR:/dump" \
-  "$GITEA_IMAGE" gitea dump --type tar.gz --file "/dump/$DUMP_FILENAME"
-DUMP_EXIT_CODE=$?
-
-if [ $DUMP_EXIT_CODE -ne 0 ]; then
-    echo "ERROR: Gitea dump command failed with exit code $DUMP_EXIT_CODE."
+  "$GITEA_IMAGE" gitea dump --type tar.gz --file "/dump/$DUMP_FILENAME"; then
+    echo "ERROR: Gitea dump command failed."
     exit 1
 fi
 echo "SUCCESS: Gitea dump created."
 
+# (#110) Gitea back online here; the offsite upload runs while serving.
+# The dump is now a closed, point-in-time tarball on local disk — the
+# upload cannot affect it, so there is no reason to stay offline for the
+# ~40-minute upload. The EXIT trap remains a safety net (docker start is
+# idempotent: starting an already-running container is harmless here).
+echo "INFO: Dump captured; restarting Gitea before the offsite upload..."
+docker start "$GITEA_CONTAINER_NAME"
+
 # 5. Authorize with B2
 echo "INFO: Authorizing with B2..."
-b2 account authorize "$B2_APPLICATION_KEY_ID" "$B2_APPLICATION_KEY"
+# (#108) silence: never let the application key / key-ID reach the log.
+b2 account authorize "$B2_APPLICATION_KEY_ID" "$B2_APPLICATION_KEY" > /dev/null 2>&1 \
+  || { echo "ERROR: B2 account authorize failed (output suppressed to protect credentials)."; exit 1; }
 echo "SUCCESS: B2 authorization complete."
 
 # 6. Upload the file to B2
