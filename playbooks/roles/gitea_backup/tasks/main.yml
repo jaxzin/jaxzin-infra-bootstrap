@@ -23,6 +23,20 @@
     mode: '0600' # Only root can read/write
   no_log: true # Prevent secrets from appearing in logs
 
+# OpenBao token file for the OIDC-source self-heal (2026-05-19 incident:
+# the authentik source's group-claim field blanked with no reconciler).
+# Same secure pattern as the B2 creds above. Optional/graceful: only written
+# when a token is supplied, so absence (e.g. early DR) never breaks deploy.
+- name: Create secure OpenBao token file for OIDC source self-heal
+  ansible.builtin.template:
+    src: gitea_oidc_reconcile.env.j2
+    dest: "{{ gitea_data_path }}/scripts/gitea_oidc_reconcile.env"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  when: gitea_oidc_reconcile_bao_token | default('') | length > 0
+
 - name: Copy Gitea dump script to NAS
   ansible.builtin.template:
     src: gitea_dump.sh.j2
