@@ -29,11 +29,34 @@
     dest: "{{ gitea_data_path }}/scripts/gitea_dump.sh"
     mode: '0755'
 
-- name: Schedule Gitea dump and B2 upload script
+- name: Ensure the dump log is not world-readable (#108)
+  ansible.builtin.file:
+    path: "{{ gitea_data_path }}/logs/gitea-dump.log"
+    owner: root
+    group: root
+    mode: '0600'
+    state: file
+  failed_when: false  # log may not exist yet on a fresh host; script also umask/chmods it
+
+# tafeen.synology.syno_crontab is `lineinfile state=present` with a
+# literal line and NO regexp — it is structurally append-only and cannot
+# remove/rewrite a prior entry when the schedule changes. That is the
+# verified root cause of the double Monday run. Reconcile explicitly:
+# purge every gitea_dump.sh /etc/crontab line first, then add exactly
+# one canonical entry. (Keyed on {{ gitea_data_path }}, never a literal
+# /volume1 path, so the no-hardcoded-paths regression check stays green.)
+- name: "Reconcile: remove any legacy/duplicate Gitea backup cron entries"
+  ansible.builtin.lineinfile:
+    path: /etc/crontab
+    regexp: '{{ gitea_data_path }}/scripts/gitea_dump\.sh'
+    state: absent
+
+- name: Schedule the single canonical Gitea dump (05:00 America/New_York, Tuesdays)
   ansible.builtin.import_role:
     name: tafeen.synology.syno_crontab
   vars:
     minute: "0"
-    hour: "2"
+    hour: "5"
+    weekday: "2"
     user: "root"
     job: "{{ gitea_data_path }}/scripts/gitea_dump.sh"
