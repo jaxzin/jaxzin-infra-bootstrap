@@ -36,7 +36,14 @@
     networks:
       - name: "{{ tailscale_network_name }}"
     ports: "{{ tailscale_host_ports | default([], true) }}"
-    dns_servers: "{{ ['100.100.100.100'] if not (tailscale_accept_dns | default(true) | bool) else omit }}"
+    # When tailscale_accept_dns is false, Tailscale's MagicDNS is not used, so
+    # Docker's default embedded resolver or the MagicDNS address ends up in
+    # /etc/resolv.conf. Both return SERVFAIL for external names like
+    # acme-v02.api.letsencrypt.org, silently blocking Let's Encrypt ACME cert
+    # renewal until the cert expires (2026-05-25 incident). Use public resolvers
+    # so ACME always works. The Serve proxy targets 127.0.0.1 (loopback), so
+    # the sidecar never needs to resolve tailnet names via DNS.
+    dns_servers: "{{ ['1.1.1.1', '8.8.8.8'] if not (tailscale_accept_dns | default(true) | bool) else omit }}"
     # Kernel-mode Tailscale needs CAP_NET_ADMIN + CAP_SYS_MODULE plus the
     # /dev/net/tun device to bring up its kernel TUN interface. Userspace
     # mode (TS_USERSPACE=true) routes WireGuard packets entirely in user

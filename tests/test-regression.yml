@@ -443,6 +443,27 @@
           is missing or not executable.
 
     # ================================================================
+    # Check 9: tailscale_sidecar DNS uses public resolvers (not MagicDNS)
+    #          when tailscale_accept_dns is false.
+    # ================================================================
+    # Tailscale's MagicDNS (100.100.100.100) returns SERVFAIL for external
+    # names on this Synology setup, silently blocking Let's Encrypt ACME cert
+    # renewal. The sidecar's Serve targets 127.0.0.1 (loopback), so it never
+    # needs to resolve tailnet names; public resolvers (1.1.1.1, 8.8.8.8)
+    # must be used instead. This check guards against regressing to
+    # 100.100.100.100 as the only resolver. (2026-05-25 incident)
+    - name: "CHECK 9: Assert tailscale_sidecar dns_servers uses public resolvers"
+      assert:
+        that:
+          - "'1.1.1.1' in tailscale_sidecar_tasks"
+          - "'100.100.100.100' not in tailscale_sidecar_tasks"
+        fail_msg: >
+          tailscale_sidecar/tasks/main.yml must use 1.1.1.1 (not
+          100.100.100.100) as the dns_servers when tailscale_accept_dns is
+          false. Tailscale's MagicDNS returns SERVFAIL for external names,
+          breaking Let's Encrypt ACME cert renewal (2026-05-25 incident).
+
+    # ================================================================
     # Cleanup
     # ================================================================
     - name: Clean up rendered test files
