@@ -36,6 +36,16 @@
     networks:
       - name: "{{ tailscale_network_name }}"
     ports: "{{ tailscale_host_ports | default([], true) }}"
+    # When tailscale_accept_dns is false, tailscaled won't configure the
+    # container's DNS, so Docker's embedded resolver (127.0.0.11) would be
+    # used — which doesn't know tailnet names. Explicitly set 100.100.100.100
+    # (MagicDNS) so the container can still resolve tailnet hostnames.
+    # IMPORTANT: with tailscale_accept_dns=false, tailscaled does NOT wire an
+    # upstream forwarder for 100.100.100.100, so external names (e.g.
+    # acme-v02.api.letsencrypt.org) will SERVFAIL. If the sidecar needs both
+    # tailnet AND external resolution (e.g. for ACME cert renewal or OIDC
+    # back-channel calls), use tailscale_accept_dns=true instead so the
+    # tailnet's global nameservers are applied as upstream forwarders.
     dns_servers: "{{ ['100.100.100.100'] if not (tailscale_accept_dns | default(true) | bool) else omit }}"
     # Kernel-mode Tailscale needs CAP_NET_ADMIN + CAP_SYS_MODULE plus the
     # /dev/net/tun device to bring up its kernel TUN interface. Userspace

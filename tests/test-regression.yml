@@ -290,6 +290,11 @@
         src: "{{ roles_dir }}/gitea_runner/tasks/main.yml"
       register: runner_tasks_raw
 
+    - name: "CHECK 8: Read gitea_runner role meta"
+      slurp:
+        src: "{{ roles_dir }}/gitea_runner/meta/main.yml"
+      register: runner_meta_raw
+
     - name: "CHECK 8: Read bootstrap-runner.sh"
       slurp:
         src: "{{ project_root }}/bootstrap-runner.sh"
@@ -311,6 +316,7 @@
         gitea_deploy: "{{ gitea_deploy_raw.content | b64decode }}"
         runner_defaults: "{{ runner_defaults_raw.content | b64decode }}"
         runner_tasks: "{{ runner_tasks_raw.content | b64decode }}"
+        runner_meta: "{{ runner_meta_raw.content | b64decode }}"
         bootstrap_runner: "{{ bootstrap_runner_raw.content | b64decode }}"
         runner_runbook: "{{ runner_runbook_raw.content | b64decode }}"
         readme: "{{ readme_raw.content | b64decode }}"
@@ -343,6 +349,23 @@
           connection:local a ~ path resolves to the CI container FS, not
           the host FS the runner container bind-mounts (the classic
           bind-source bug). See defaults/main.yml comment.
+
+    - name: "CHECK 8: Assert meta arg-spec is doc-only (no default values; single source = defaults/main.yml)"
+      assert:
+        that:
+          # Ansible argument_specs `default:` is documentation-only and is
+          # never applied at runtime — restating values here just drifts
+          # from defaults/main.yml (the single source of truth). The spec
+          # must declare type/required/description only. (The word
+          # "default" may appear in description prose, but the literal
+          # `default:` KEY must not.)
+          - "'default:' not in runner_meta"
+        fail_msg: >
+          playbooks/roles/gitea_runner/meta/main.yml reintroduced a
+          `default:` key. argument_specs defaults are doc-only in Ansible;
+          the single source of default VALUES is
+          playbooks/roles/gitea_runner/defaults/main.yml. Remove the
+          default from meta and document it by pointing to defaults/main.yml.
 
     - name: "CHECK 8: Assert the registration token is minted in Play 1, not the role"
       assert:
@@ -418,6 +441,41 @@
         fail_msg: >
           bootstrap-runner.sh (the documented one-time runner-host seed)
           is missing or not executable.
+
+    # ================================================================
+    # Check 9: Gitea sidecar uses tailscale_accept_dns: true so MagicDNS
+    #          has Cloudflare as its upstream forwarder for external names.
+    # ================================================================
+    # With tailscale_accept_dns=false, tailscaled opts out of the tailnet's
+    # global nameserver config ("Override DNS servers" → Cloudflare 1.1.1.1),
+    # leaving 100.100.100.100 with no upstream forwarder. External names like
+    # acme-v02.api.letsencrypt.org then SERVFAIL, silently blocking Let's
+    # Encrypt ACME cert renewal for ~30 days until the cert expires. OIDC
+    # back-channel calls to auth.forest-draconis.ts.net also require
+    # MagicDNS, so we can't simply switch to a public resolver either.
+    # The fix: tailscale_accept_dns=true so the container gets all three:
+    # tailnet names (MagicDNS), external names (Cloudflare upstream), and
+    # lan.jaxzin.com (Split DNS). (2026-05-25 incident)
+    - name: "CHECK 9: Read gitea-deploy.yml for tailscale_accept_dns assertion"
+      slurp:
+        src: "{{ project_root }}/playbooks/gitea-deploy.yml"
+      register: gitea_deploy_raw
+
+    - name: "CHECK 9: Decode gitea-deploy.yml"
+      set_fact:
+        gitea_deploy: "{{ gitea_deploy_raw.content | b64decode }}"
+
+    - name: "CHECK 9: Assert Gitea sidecar has tailscale_accept_dns: true"
+      assert:
+        that:
+          - "'tailscale_accept_dns: true' in gitea_deploy"
+          - "'tailscale_accept_dns: false' not in gitea_deploy"
+        fail_msg: >
+          gitea-deploy.yml must set tailscale_accept_dns: true for the Gitea
+          Tailscale sidecar. With false, tailscaled opts out of the tailnet's
+          global nameservers, so 100.100.100.100 has no upstream forwarder
+          and SERVFAILs on external names — breaking ACME cert renewal and
+          potentially OIDC back-channel calls. (2026-05-25 incident)
 
     # ================================================================
     # Cleanup
