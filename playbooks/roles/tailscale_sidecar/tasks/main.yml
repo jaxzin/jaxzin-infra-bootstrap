@@ -147,13 +147,17 @@
   # Prepend 127.0.0.11; its upstream is 100.100.100.100 (wired via dns_servers
   # at container start), which tailscaled connects to Cloudflare — so the full
   # chain works: Docker names → 127.0.0.11; tailnet/external names →
-  # 127.0.0.11 → 100.100.100.100 → Cloudflare. Idempotent: grep exits 0 and
-  # sed is skipped if 127.0.0.11 is already present. (2026-05-25 incident)
+  # 127.0.0.11 → 100.100.100.100 → Cloudflare. (2026-05-25 incident)
+  # IMPORTANT: must NOT use `sed -i` — Docker bind-mounts resolv.conf at
+  # the file inode level; sed -i calls rename() which fails with EBUSY on
+  # bind-mount targets. Stage through /tmp then overwrite in-place with `>`
+  # (open+truncate, no rename). Idempotent: no-op if 127.0.0.11 already present.
   community.docker.docker_container_exec:
     container: "{{ tailscale_container_name }}"
     command: >-
       sh -c "grep -q '^nameserver 127.0.0.11' /etc/resolv.conf ||
-             sed -i '1s/^/nameserver 127.0.0.11\n/' /etc/resolv.conf"
+             { { echo 'nameserver 127.0.0.11'; cat /etc/resolv.conf; } > /tmp/resolv_new &&
+             cat /tmp/resolv_new > /etc/resolv.conf; }"
   changed_when: false
   when: >
     tailscale_enabled | bool and not ansible_check_mode and
