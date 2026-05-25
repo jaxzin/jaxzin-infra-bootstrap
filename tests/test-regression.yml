@@ -443,25 +443,39 @@
           is missing or not executable.
 
     # ================================================================
-    # Check 9: tailscale_sidecar DNS uses public resolvers (not MagicDNS)
-    #          when tailscale_accept_dns is false.
+    # Check 9: Gitea sidecar uses tailscale_accept_dns: true so MagicDNS
+    #          has Cloudflare as its upstream forwarder for external names.
     # ================================================================
-    # Tailscale's MagicDNS (100.100.100.100) returns SERVFAIL for external
-    # names on this Synology setup, silently blocking Let's Encrypt ACME cert
-    # renewal. The sidecar's Serve targets 127.0.0.1 (loopback), so it never
-    # needs to resolve tailnet names; public resolvers (1.1.1.1, 8.8.8.8)
-    # must be used instead. This check guards against regressing to
-    # 100.100.100.100 as the only resolver. (2026-05-25 incident)
-    - name: "CHECK 9: Assert tailscale_sidecar dns_servers uses public resolvers"
+    # With tailscale_accept_dns=false, tailscaled opts out of the tailnet's
+    # global nameserver config ("Override DNS servers" → Cloudflare 1.1.1.1),
+    # leaving 100.100.100.100 with no upstream forwarder. External names like
+    # acme-v02.api.letsencrypt.org then SERVFAIL, silently blocking Let's
+    # Encrypt ACME cert renewal for ~30 days until the cert expires. OIDC
+    # back-channel calls to auth.forest-draconis.ts.net also require
+    # MagicDNS, so we can't simply switch to a public resolver either.
+    # The fix: tailscale_accept_dns=true so the container gets all three:
+    # tailnet names (MagicDNS), external names (Cloudflare upstream), and
+    # lan.jaxzin.com (Split DNS). (2026-05-25 incident)
+    - name: "CHECK 9: Read gitea-deploy.yml for tailscale_accept_dns assertion"
+      slurp:
+        src: "{{ project_root }}/playbooks/gitea-deploy.yml"
+      register: gitea_deploy_raw
+
+    - name: "CHECK 9: Decode gitea-deploy.yml"
+      set_fact:
+        gitea_deploy: "{{ gitea_deploy_raw.content | b64decode }}"
+
+    - name: "CHECK 9: Assert Gitea sidecar has tailscale_accept_dns: true"
       assert:
         that:
-          - "'1.1.1.1' in tailscale_sidecar_tasks"
-          - "'100.100.100.100' not in tailscale_sidecar_tasks"
+          - "'tailscale_accept_dns: true' in gitea_deploy"
+          - "'tailscale_accept_dns: false' not in gitea_deploy"
         fail_msg: >
-          tailscale_sidecar/tasks/main.yml must use 1.1.1.1 (not
-          100.100.100.100) as the dns_servers when tailscale_accept_dns is
-          false. Tailscale's MagicDNS returns SERVFAIL for external names,
-          breaking Let's Encrypt ACME cert renewal (2026-05-25 incident).
+          gitea-deploy.yml must set tailscale_accept_dns: true for the Gitea
+          Tailscale sidecar. With false, tailscaled opts out of the tailnet's
+          global nameservers, so 100.100.100.100 has no upstream forwarder
+          and SERVFAILs on external names — breaking ACME cert renewal and
+          potentially OIDC back-channel calls. (2026-05-25 incident)
 
     # ================================================================
     # Cleanup
