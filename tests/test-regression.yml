@@ -614,6 +614,35 @@
           blocks Gitea (tier-1/DR-first) from coming up.
 
     # ================================================================
+    # Check 14: Tailscale sidecar restores Docker embedded DNS resolver
+    #           (127.0.0.11) after tailscaled writes resolv.conf.
+    # ================================================================
+    # With tailscale_accept_dns=true, tailscaled writes resolv.conf and
+    # removes Docker's 127.0.0.11. Without it, containers sharing the
+    # sidecar's netns (e.g. gitea via network_mode:container:) can't
+    # resolve Docker service names like gitea-db, causing DB failures.
+    # The role must: (a) always set dns_servers=['100.100.100.100']
+    # unconditionally (not gated on tailscale_accept_dns) so 127.0.0.11's
+    # upstream is MagicDNS, and (b) inject 127.0.0.11 back after tailscaled
+    # writes resolv.conf when tailscale_accept_dns=true. (2026-05-25 incident)
+    - name: "CHECK 14: Assert tailscale_sidecar restores 127.0.0.11 in resolv.conf"
+      assert:
+        that:
+          - "'nameserver 127.0.0.11' in tailscale_sidecar_tasks"
+          - "'Restore Docker embedded DNS resolver' in tailscale_sidecar_tasks"
+          # The OLD dns_servers was a Jinja2 inline-if gated on tailscale_accept_dns;
+          # the new form is an unconditional literal list. Absence of the old
+          # inline-if fragment proves the conditional form was removed.
+          - "'if not (tailscale_accept_dns' not in tailscale_sidecar_tasks"
+        fail_msg: >
+          tailscale_sidecar/tasks/main.yml must: (1) set dns_servers unconditionally
+          to the literal list (no inline-if on tailscale_accept_dns — old conditional
+          form is banned), and (2) have a task named 'Restore Docker embedded DNS
+          resolver' that injects 'nameserver 127.0.0.11' back after tailscaled writes
+          resolv.conf. Without this, deploy fails with "nc: bad address 'gitea-db'"
+          (2026-05-25 incident).
+
+    # ================================================================
     # Cleanup
     # ================================================================
     - name: Clean up rendered test files
