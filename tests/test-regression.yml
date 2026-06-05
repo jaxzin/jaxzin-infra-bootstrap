@@ -643,6 +643,36 @@
           (2026-05-25 incident).
 
     # ================================================================
+    # Check 15: Tailscale sidecar self-heals resolv.conf continuously,
+    #           not just at deploy time.
+    # ================================================================
+    # The CHECK 14 post-start task fixes resolv.conf ONCE per deploy, but
+    # tailscaled strips 127.0.0.11 on every restart (container/daemon/host
+    # bounce, tailnet reconnect), so it silently re-breaks between deploys
+    # (2026-06-05 incident: a Synology ContainerManager restart re-triggered
+    # the bug; gitea then failed DB resolution with "lookup gitea-db ...
+    # no such host"). The durable fix is a Docker healthcheck on the sidecar
+    # that re-asserts 127.0.0.11 on a fixed interval forever and reports
+    # healthy iff it's present — a reconcile loop, not a one-shot. This check
+    # locks in that the healthcheck exists AND carries the reconcile write
+    # (presence of 'healthcheck:' alone is insufficient — it must repair).
+    - name: "CHECK 15: Assert tailscale_sidecar healthcheck self-heals resolv.conf"
+      assert:
+        that:
+          - "'healthcheck:' in tailscale_sidecar_tasks"
+          # The healthcheck must carry the in-place reconcile write, proving it
+          # repairs rather than merely probing. The redirect to /tmp/resolv_new
+          # is the signature of the open+truncate (non-rename) write pattern.
+          - "'/tmp/resolv_new' in tailscale_sidecar_tasks"
+        fail_msg: >
+          tailscale_sidecar/tasks/main.yml must have a Docker healthcheck on the
+          sidecar that continuously reconciles resolv.conf (re-prepends
+          'nameserver 127.0.0.11' via the /tmp/resolv_new open+truncate write,
+          never 'sed -i'). Without a continuous reconciler the deploy-time fix is
+          stripped on the next tailscaled restart and gitea loses gitea-db
+          resolution (2026-06-05 incident).
+
+    # ================================================================
     # Cleanup
     # ================================================================
     - name: Clean up rendered test files
