@@ -42,10 +42,33 @@
     # unknown names to 100.100.100.100 (tailnet names resolve; external names
     # SERVFAIL because accept_dns=false skips wiring Cloudflare as upstream).
     # When tailscale_accept_dns=true, tailscaled writes resolv.conf and removes
-    # 127.0.0.11; a post-start task restores it so Docker service names AND
-    # tailnet/external names all resolve: Docker names → 127.0.0.11; everything
-    # else → 127.0.0.11 → 100.100.100.100 → Cloudflare. (2026-05-25 incident)
+    # 127.0.0.11; the post-start task below restores it so Docker service names
+    # AND tailnet/external names all resolve: Docker names → 127.0.0.11;
+    # everything else → 127.0.0.11 → 100.100.100.100 → Cloudflare.
+    # (2026-05-25 incident)
     dns_servers: "['100.100.100.100']"
+    # Self-healing DNS reconciler. The post-start task fixes resolv.conf ONCE,
+    # at deploy time — but tailscaled rewrites resolv.conf and strips 127.0.0.11
+    # on EVERY restart (container/daemon/host bounce, tailnet reconnect), which
+    # silently breaks gitea-db resolution between deploys (2026-06-05 incident:
+    # a ContainerManager restart re-triggered the bug). A Docker healthcheck
+    # runs on a fixed interval forever and may have side effects, so it doubles
+    # as a reconcile loop: re-prepend 127.0.0.11 whenever it's missing, then
+    # report healthy iff it's present. Same in-place write as the post-start
+    # task (open+truncate via >, never `sed -i`/rename — EBUSY on the bind
+    # mount). gitea's 10×3s DB-retry loop covers the ≤interval repair window.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          grep -q '^nameserver 127.0.0.11' /etc/resolv.conf ||
+          { { echo 'nameserver 127.0.0.11'; cat /etc/resolv.conf; } > /tmp/resolv_new &&
+          cat /tmp/resolv_new > /etc/resolv.conf; };
+          grep -q '^nameserver 127.0.0.11' /etc/resolv.conf
+      interval: "{{ tailscale_resolv_heal_interval | default('15s') }}"
+      timeout: "{{ tailscale_resolv_heal_timeout | default('10s') }}"
+      retries: "{{ tailscale_resolv_heal_retries | default(3) }}"
+      start_period: "{{ tailscale_resolv_heal_start_period | default('10s') }}"
     # Kernel-mode Tailscale needs CAP_NET_ADMIN + CAP_SYS_MODULE plus the
     # /dev/net/tun device to bring up its kernel TUN interface. Userspace
     # mode (TS_USERSPACE=true) routes WireGuard packets entirely in user
