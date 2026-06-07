@@ -14,7 +14,7 @@ jobs:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
       # Static (NO secret refs) so it is valid at workflow-load time.
       # Play 2 now deploys the runner over SSH to a REMOTE host
-      # (GITEA_RUNNER_HOST); it no longer drives a co-located host Docker
+      # (GITEA_RUNNER_HOST); it no longer drives a same-box host Docker
       # daemon from inside this container, so no host bind-mounts are needed
       # here. See docs/runbooks/gitea-runner-host.md.
       options: ""
