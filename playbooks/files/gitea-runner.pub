@@ -1,3 +1,1 @@
-# Replace this line with the real dedicated runner PUBLIC key (ssh-ed25519 ...).
-# Generated once by the operator (see seed-runner-ssh.yml header / runbook).
-# The matching PRIVATE key goes into the GITEA_RUNNER_SSH_KEY CI secret.
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICyJ5SnO2uP9OnSit49sBb2848Y1ZVczvQXvav8uRmse gitea-runner
