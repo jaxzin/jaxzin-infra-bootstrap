@@ -38,9 +38,11 @@
 - name: Ensure the Docker SDK for Python is installed (community.docker needs it)
   # community.docker.docker_container runs ON this target over SSH, so the
   # SDK must live here — not in the controller image. --break-system-packages
-  # for PEP 668 (Debian bookworm). Pinned to match the runner image.
+  # satisfies PEP 668 on Debian bookworm / Ubuntu >= 24.04 (the supported
+  # targets). On older distros without that flag this task fails fast — by
+  # design we only target modern, externally-managed-Python hosts.
   ansible.builtin.pip:
-    name: docker==7.1.0
+    name: "docker=={{ runner_host_seed_docker_sdk_version }}"
     extra_args: --break-system-packages
 
 - name: Ensure Tailscale is installed (tailscale.com/install.sh)
@@ -61,13 +63,19 @@
     enabled: true
     state: started
 
-- name: Join the tailnet (idempotent; no-op if already up)
-  # Kernel mode, no --ssh. `tailscale up --authkey` is idempotent: on a host
-  # already up it reconciles without disrupting an existing session.
+- name: Check current tailnet status
+  ansible.builtin.command:
+    cmd: tailscale status
+  register: ts_status
+  changed_when: false
+  failed_when: false
+
+- name: Join the tailnet (only when not already up)
+  # Kernel mode, no --ssh. Gated on status so re-runs are true no-ops and
+  # the play output reflects a real join only when one happens.
   ansible.builtin.command:
     cmd: "tailscale up --authkey {{ runner_host_seed_tailscale_authkey }}"
-  register: ts_up
-  changed_when: false
+  when: ts_status.rc != 0
   no_log: true
 
 - name: Ensure the runner data dir exists
