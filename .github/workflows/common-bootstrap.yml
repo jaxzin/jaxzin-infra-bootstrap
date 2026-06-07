@@ -106,6 +106,7 @@ jobs:
         run: |
           set -eu
           mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
           printf '%s\n' "$GITEA_RUNNER_SSH_KEY" > ~/.ssh/gitea_runner_key
           chmod 600 ~/.ssh/gitea_runner_key
 
