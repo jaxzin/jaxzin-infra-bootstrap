@@ -18,13 +18,13 @@ This tier uses the application-native backup and restore functionality of Gitea,
 
 The `gitea-deploy.yml` playbook automatically **configures and enables** a daily, automated backup. It deploys a script to the NAS and schedules it to run daily via a cron job. This script stops Gitea, creates a full dump, uploads it to Backblaze B2, and restarts Gitea. The playbook also deploys Certbot for SSL certificate management.
 
-`gitea-deploy.yml` is **two plays in one invocation**: Play 1 provisions the Gitea server on the NAS; **Play 2 provisions the Gitea Actions runner on the same machine as the GitHub self-hosted runner** (`connection: local` — see `docs/runbooks/gitea-runner-host.md`). Running the bootstrap workflow therefore brings the runner online *as part of bootstrap* — there is **no separate "deploy the runner" step** and no Gitea-side trigger to fire.
+`gitea-deploy.yml` is **two plays in one invocation**: Play 1 provisions the Gitea server on the NAS; **Play 2 deploys the Gitea Actions runner over SSH to `GITEA_RUNNER_HOST`** (via the `runner_host_seed` + `gitea_runner` roles — see `docs/runbooks/gitea-runner-host.md`). Running the bootstrap workflow therefore brings the runner online *as part of bootstrap* — there is **no separate "deploy the runner" step** and no Gitea-side trigger to fire.
 
 ### The manual seed
 
-Disaster recovery has **one** irreducible, documented manual seed (a committed, version-controlled procedure — not improvisation): a self-hosted **GitHub Actions runner** host that is **also** the Gitea runner host, seeded once with `sudo ./bootstrap-runner.sh`.
+Disaster recovery has **one** irreducible, documented manual seed (a committed, version-controlled procedure — not improvisation): a self-hosted **GitHub Actions runner** on a dedicated tailnet-joined Linux host, acting as the bootstrap controller. The Gitea runner host (`GITEA_RUNNER_HOST`) is a separate machine — its Docker environment and deploy user are provisioned automatically by the `runner_host_seed` role when the bootstrap workflow runs.
 
-> **PREREQ (easy to miss — no script enforces it):** that host must be a **dedicated tailnet-joined Linux box that is NOT the NAS and NOT a laptop/Mac**. The GitHub runner and the Gitea runner are the *same* machine; Play 2 connects locally (no SSH, no Tailscale SSH, no key). `bootstrap-runner.sh` installs Docker, creates the `docker`-group deploy user, ensures the host is on the tailnet (plain `tailscale up`, no `--ssh`), and creates the data dir. Full detail: `docs/runbooks/gitea-runner-host.md`.
+> **PREREQ (easy to miss — no script enforces it):** the GitHub Actions runner (controller) must be a **dedicated tailnet-joined Linux box that is not the NAS**. It needs SSH access to `GITEA_RUNNER_HOST` and a working Docker install. Full detail: `docs/runbooks/gitea-runner-host.md`.
 
 ### Recovery Method 1: Automated GitHub Action (Recommended)
 
@@ -32,7 +32,7 @@ This is the primary and recommended method for disaster recovery. It uses GitHub
 
 **Prerequisites:**
 
-*   The self-hosted GitHub Actions runner online, on the dedicated tailnet-joined Linux host (NOT the NAS, NOT a laptop), seeded once with `sudo ./bootstrap-runner.sh` — the single manual seed above. This same host runs the Gitea runner. **No SSH key, no Tailscale SSH** — Play 2 connects locally. Full contract: `docs/runbooks/gitea-runner-host.md`.
+*   The self-hosted GitHub Actions runner online on a dedicated tailnet-joined Linux host (the bootstrap controller — the single manual seed above). Play 2 deploys the Gitea runner **over SSH** to `GITEA_RUNNER_HOST`; the controller and the runner target are separate machines. Full contract: `docs/runbooks/gitea-runner-host.md`.
 
 **Recovery Steps:**
 
@@ -47,9 +47,8 @@ This method should only be used if GitHub Actions is unavailable or the automate
 **Prerequisites:**
 
 *   A new NAS host with Ansible and Docker installed.
-*   The runner host seeded with `sudo ./bootstrap-runner.sh` (see `docs/runbooks/gitea-runner-host.md`). Run the manual recovery **from that same host** — Play 2 uses a local connection, so the control machine and the runner host must be the same box.
 *   A local checkout of this repository.
-*   A valid Ansible inventory file defining a `[nas]` group and a `[gitea_runner]` group, the latter as `<label> ansible_connection=local` (no SSH user/key — it deploys to this same host's Docker).
+*   A valid Ansible inventory defining a `[nas]` group and a `[gitea_runner]` group, the latter as `<GITEA_RUNNER_HOST> ansible_user=<user> ansible_ssh_private_key_file=<key>` (SSH to the remote runner host). The `runner_host_seed` role will prepare the target if it has not been seeded yet. Full contract: `docs/runbooks/gitea-runner-host.md`.
 *   The following environment variables must be set:
     *   `B2_BUCKET_NAME`
     *   `B2_APPLICATION_KEY_ID`

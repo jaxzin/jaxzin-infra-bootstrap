@@ -8,7 +8,7 @@ It is not monolithically responsible for _all_ (IaC) on my personal network. The
 IaC CI/CD repos and workflows. This is meant to ensure I always have a reliable disaster-recovery path.
 
 The only prerequisites to performing a disaster recovery are:
-1. There is an available self-hosted Github runner on the home network, installed on a **dedicated tailnet-joined Linux host (NOT the NAS, NOT a laptop/Mac)** that has been seeded once with `sudo ./bootstrap-runner.sh` — this same host also runs the Gitea runner (see "Self-hosting a GitHub Runner") and...
+1. There is an available self-hosted GitHub runner on the home network (LAN + tailnet reachable), acting as the bootstrap controller. The Gitea Actions runner is deployed from there **over SSH** to a separate host set by the `GITEA_RUNNER_HOST` variable (seeded automatically by the `runner_host_seed` role in CI). See "Self-hosting a GitHub Runner" and...
 2. that runner is attached to the mirror of this repo on Github.com and...
 3. there is a Synology NAS available on the home network...
 4. with the hostname defined in the Github repo’s variable `NAS_HOST` and...
@@ -225,25 +225,15 @@ In GitHub (Settings → Secrets and variables → Actions → Variables):
 
 ### 3. Self-hosting a GitHub Runner
 
-> ## ⚠️ Install the GitHub runner ON the machine that will host the Gitea runner
+> ## ℹ️ The Gitea runner host is remote and swappable
 >
-> The Gitea Actions runner is **co-located** with the GitHub self-hosted
-> runner: the bootstrap deploy reaches it with a **local connection** (no
-> SSH/key) *because they are the same box*. So this is not "any spare
-> machine":
+> The Gitea Actions runner is deployed **over SSH** to `GITEA_RUNNER_HOST`.
+> The controller (the home-network GitHub runner) and the target are
+> **different machines** — no same-box requirement. The target only needs
+> SSH + a sudo user + a Docker-capable Linux host on the tailnet; the
+> `runner_host_seed` role provisions the rest.
 >
-> - ✅ Install it on the **dedicated Linux host** that will run the Gitea
->   runner (a tailnet-joined Linux box — e.g. an always-on mini PC).
-> - ❌ **NOT your laptop/MacBook** "to get things up quickly." It must be
->   Linux (the job runs in a Linux container) and it must be the same
->   long-lived host as the Gitea runner. A laptop runner breaks the whole
->   topology.
-> - ❌ **NOT the Synology NAS/DSM.** The NAS is the *target* of the deploy
->   (Play 1), deliberately decoupled from the runner; co-locating the
->   runner there reintroduces the NAS/dind problems this design removed.
->
-> Full contract and rationale: [docs/runbooks/gitea-runner-host.md](docs/runbooks/gitea-runner-host.md).
-> Seed that host once with `sudo ./bootstrap-runner.sh` (repo root).
+> Full contract: [docs/runbooks/gitea-runner-host.md](docs/runbooks/gitea-runner-host.md).
 
 A self-hosted GitHub runner is required to execute the disaster recovery workflows from GitHub. It must be on a Linux 
 machine with Docker installed (the bootstrap process uses a container, unsupported by GitHub runners on macOS/Windows). 
