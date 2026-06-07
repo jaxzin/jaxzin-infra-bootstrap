@@ -1,0 +1,77 @@
+---
+# Seed a generic Linux host as a Gitea runner target. Runs over SSH with
+# become. Idempotent. The gitea_runner role ASSERTS what this PROVIDES.
+# See docs/runbooks/gitea-runner-host.md.
+
+- name: Assert a tailnet authkey was provided
+  assert:
+    that:
+      - runner_host_seed_tailscale_authkey | string | length > 0
+    fail_msg: >-
+      runner_host_seed_tailscale_authkey is empty. Pass the TS_AUTHKEY CI
+      secret so this host can join the tailnet (the runner CONTAINER needs
+      tailnet egress to reach Gitea). See docs/runbooks/gitea-runner-host.md.
+
+- name: Ensure Docker Engine is installed (get.docker.com)
+  ansible.builtin.shell: |
+    set -eu
+    if command -v docker >/dev/null 2>&1; then
+      echo "present"
+    else
+      curl -fsSL https://get.docker.com | sh
+      echo "installed"
+    fi
+  register: docker_install
+  changed_when: "'installed' in docker_install.stdout"
+
+- name: Ensure the Docker service is enabled and running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Ensure pip3 is present (for the Docker SDK)
+  ansible.builtin.package:
+    name: python3-pip
+    state: present
+
+- name: Ensure the Docker SDK for Python is installed (community.docker needs it)
+  # community.docker.docker_container runs ON this target over SSH, so the
+  # SDK must live here — not in the controller image. --break-system-packages
+  # for PEP 668 (Debian bookworm). Pinned to match the runner image.
+  ansible.builtin.pip:
+    name: docker==7.1.0
+    extra_args: --break-system-packages
+
+- name: Ensure Tailscale is installed (tailscale.com/install.sh)
+  ansible.builtin.shell: |
+    set -eu
+    if command -v tailscale >/dev/null 2>&1; then
+      echo "present"
+    else
+      curl -fsSL https://tailscale.com/install.sh | sh
+      echo "installed"
+    fi
+  register: ts_install
+  changed_when: "'installed' in ts_install.stdout"
+
+- name: Ensure tailscaled is enabled and running
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+
+- name: Join the tailnet (idempotent; no-op if already up)
+  # Kernel mode, no --ssh. `tailscale up --authkey` is idempotent: on a host
+  # already up it reconciles without disrupting an existing session.
+  ansible.builtin.command:
+    cmd: "tailscale up --authkey {{ runner_host_seed_tailscale_authkey }}"
+  register: ts_up
+  changed_when: false
+  no_log: true
+
+- name: Ensure the runner data dir exists
+  ansible.builtin.file:
+    path: "{{ runner_host_seed_data_path }}"
+    state: directory
+    mode: '0775'

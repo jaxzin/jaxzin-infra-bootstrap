@@ -1,0 +1,13 @@
+---
+# runner_host_seed — installs the prerequisites the gitea_runner role then
+# ASSERTS. This is the only unit permitted to install host packages.
+#
+# Data dir: the gitea_runner role writes its config here and the host Docker
+# daemon bind-mounts it into the runner container. Fixed host path.
+runner_host_seed_data_path: >-
+  {{ lookup('ansible.builtin.env', 'GITEA_RUNNER_DATA_PATH')
+     | default('/opt/gitea-runner', true) }}
+
+# Tailnet authkey for the host's `tailscale up`. Injected by the deploy
+# (reuses the existing TS_AUTHKEY CI secret). REQUIRED.
+runner_host_seed_tailscale_authkey: ""
