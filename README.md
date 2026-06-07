@@ -59,22 +59,24 @@ Makefile                        # Makefile for common tasks
 
 ## Architecture Diagrams
 
-### Container Networking (Tailscale Sidecar Pattern)
+### Container Networking (Gitea sidecar + remote runner)
 
 ```mermaid
 flowchart TB
     subgraph Tailnet["Tailscale Tailnet"]
         TG_TS["tailscale-gitea<br/>(TS_SERVE: HTTPS → HTTP :3000)"]
-        TR_TS["tailscale-runner<br/>(userspace mode, exposes :1055 SOCKS5 / :1099 HTTP CONNECT)"]
+        RunnerHost["GITEA_RUNNER_HOST<br/>(separate Linux host, host-level Tailscale)"]
     end
-    subgraph DockerNet["gitea-net (Docker Bridge)"]
+    subgraph DockerNet["gitea-net (Docker Bridge, on the NAS)"]
         TG_TS --- |"network_mode: container"| Gitea["gitea<br/>(HTTP :3000, SSH :22)"]
         DB["gitea-db<br/>(MySQL :3306)"]
-        Runner["gitea-runner<br/>(Act Runner)"] --- |"on gitea-net"| TR_TS
-        Runner -.->|"HTTPS_PROXY :1099"| TR_TS
+    end
+    subgraph RunnerBox["GITEA_RUNNER_HOST Docker daemon"]
+        Runner["gitea-runner<br/>(act_runner: bridge + /var/run/docker.sock)"]
     end
     Gitea --> |"gitea-db:3306"| DB
-    Runner --> |"https://gitea.tailnet"| TG_TS
+    RunnerHost -. "runs the runner container" .-> Runner
+    Runner --> |"https://gitea.tailnet (via host Tailscale)"| TG_TS
 ```
 
 ### Normal Operation (Happy Path)
