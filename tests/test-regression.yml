@@ -451,7 +451,7 @@
     # leaving 100.100.100.100 with no upstream forwarder. External names like
     # acme-v02.api.letsencrypt.org then SERVFAIL, silently blocking Let's
     # Encrypt ACME cert renewal for ~30 days until the cert expires. OIDC
-    # back-channel calls to auth.forest-draconis.ts.net also require
+    # back-channel calls to auth.<tailnet>.ts.net also require
     # MagicDNS, so we can't simply switch to a public resolver either.
     # The fix: tailscale_accept_dns=true so the container gets all three:
     # tailnet names (MagicDNS), external names (Cloudflare upstream), and
