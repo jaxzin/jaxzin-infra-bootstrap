@@ -133,19 +133,17 @@ can be found in the [CONTRIBUTING.md](CONTRIBUTING.md) file.
 
 ## Tailscale Integration
 
-Gitea and the Gitea Actions runner are each paired with a [Tailscale](https://tailscale.com) sidecar container that places them on your private Tailscale tailnet. This provides secure, zero-config access to Gitea from any device on your tailnet without exposing it to the public internet.
+Gitea is paired with a [Tailscale](https://tailscale.com) sidecar container that places it on your private Tailscale tailnet, providing secure, zero-config access from any device on your tailnet without exposing it to the public internet. The Gitea Actions runner is **not** a sidecar — it is deployed over SSH to a separate tailnet host (`GITEA_RUNNER_HOST`) and reaches Gitea through that host's own Tailscale (see [docs/runbooks/gitea-runner-host.md](docs/runbooks/gitea-runner-host.md)).
 
 ### How It Works
 
-The two sidecars use **different Tailscale networking modes** because their workloads have different network needs. See [docs/architecture/tailscale-sidecar-modes.md](docs/architecture/tailscale-sidecar-modes.md) for the deep dive.
-
 **Gitea sidecar (kernel-mode, namespace-shared):**
-Gitea shares its network namespace with the `tailscale-gitea` sidecar via Docker's `network_mode: container:` option. The sidecar handles Tailscale connectivity, and [Tailscale Serve](https://tailscale.com/kb/1312/serve) terminates TLS for `https://gitea.<your-tailnet>` with a Tailscale-managed certificate, proxying to Gitea's HTTP port inside the shared namespace. Gitea itself runs plain HTTP internally; all HTTPS for the tailnet is handled by Tailscale Serve. Kernel mode is required here because Tailscale Serve depends on the kernel TUN device.
+Gitea shares its network namespace with the `tailscale-gitea` sidecar via Docker's `network_mode: container:` option. The sidecar handles Tailscale connectivity, and [Tailscale Serve](https://tailscale.com/kb/1312/serve) terminates TLS for `https://gitea.<your-tailnet>` with a Tailscale-managed certificate, proxying to Gitea's HTTP port inside the shared namespace. Gitea itself runs plain HTTP internally; all HTTPS for the tailnet is handled by Tailscale Serve. Kernel mode is required here because Tailscale Serve depends on the kernel TUN device. See [docs/architecture/tailscale-sidecar-modes.md](docs/architecture/tailscale-sidecar-modes.md) for the deep dive.
 
-**Runner sidecar (userspace-mode, multi-network):**
-The `gitea-runner` sits on the same `gitea-net` Docker bridge as the `tailscale-runner` sidecar — NOT in its namespace. This gives `gitea-runner` (and the dind dockerd it embeds) full LAN access through the host's networking stack, which is essential for job containers that need to reach LAN destinations (UniFi controller, NAS DNS, etc.). The runner reaches the tailnet through the sidecar's HTTP-CONNECT/SOCKS5 proxy via `HTTPS_PROXY=http://tailscale-runner:1099` / `ALL_PROXY=socks5://tailscale-runner:1055`. The sidecar runs Tailscale in [userspace networking mode](https://tailscale.com/kb/1112/userspace-networking) to expose those proxy ports to its peers.
+The Gitea sidecar sits on `gitea-net`, which keeps MySQL (`gitea-db:3306`) reachable from Gitea while staying off the tailnet entirely.
 
-Both sidecars sit on `gitea-net`, which keeps MySQL (`gitea-db:3306`) reachable from Gitea while staying off the tailnet entirely.
+**Gitea Actions runner (remote, host-tailnet, socket-mounted):**
+The runner is **not** a sidecar. It is deployed over SSH to `GITEA_RUNNER_HOST` — a separate Linux host that already has Docker and is on the tailnet (seeded by the `runner_host_seed` role). The act_runner container runs with `network_mode: bridge` and bind-mounts the host's Docker socket, so job containers run on the host's own daemon and reach both the LAN and the tailnet directly through the host's networking — no dind, no SOCKS/HTTP proxy, no sidecar. Full contract: [docs/runbooks/gitea-runner-host.md](docs/runbooks/gitea-runner-host.md).
 
 ### Using This Repo as a Template
 
@@ -155,7 +153,7 @@ To set up Tailscale for your own fork:
 2. Generate a **reusable, non-ephemeral** auth key at Settings → Keys in the Tailscale admin console.
 3. Set the `TS_AUTHKEY` **secret** and `TS_TAILNET` **variable** in your GitHub repo settings (see the table below).
 4. Run the bootstrap workflow — Gitea will be available at `https://gitea.<your-tailnet>` from any tailnet device.
-5. The runner will appear as `gitea-runner` on your tailnet.
+5. The runner is deployed to `GITEA_RUNNER_HOST` and reaches Gitea through that host's tailnet.
 
 ### Disabling Tailscale
 
