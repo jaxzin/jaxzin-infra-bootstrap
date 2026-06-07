@@ -215,10 +215,12 @@
     # surface and does carry the new socket-mount shape. Complements
     # check_docker_tasks.py Check H (which greps source) by validating
     # what actually ships. See docs/runbooks/gitea-runner-host.md.
-    - name: "CHECK 7: Render gitea_runner config.yaml.j2"
+    - name: "CHECK 7: Render gitea_runner config.yaml.j2 (arm64 target)"
       template:
         src: "{{ roles_dir }}/gitea_runner/templates/config.yaml.j2"
         dest: /tmp/test-gitea-runner-config.yml
+      vars:
+        ansible_architecture: aarch64
 
     - name: "CHECK 7: Read rendered gitea_runner config"
       slurp:
@@ -248,28 +250,26 @@
     - name: "CHECK 7: Assert the socket-mount runner shape is present"
       assert:
         that:
-          # privileged is only needed for dind, which is gone.
           - "'privileged: false' in rendered_runner_config"
           - "'self-hosted' in rendered_runner_config"
           - "'ubuntu-latest:docker://docker.gitea.com/runner-images:ubuntu-latest' in rendered_runner_config"
+          # arch label is derived from the target (aarch64 → arm64 here)
+          - "'arm64' in rendered_runner_config"
+          - "'\"amd64\"' not in rendered_runner_config"
         fail_msg: >
           Rendered runner config is missing the expected socket-mount
           shape (privileged:false + the standard labels). Got:
           {{ rendered_runner_config }}
 
     # ================================================================
-    # Check 8: co-located / local-connection bootstrap contract
+    # Check 8: opportunistic SSH-based runner contract
     # ================================================================
-    # Locks in the operator-approved design after the Tailscale-SSH
-    # approach was dropped: the GitHub self-hosted runner and the Gitea
-    # runner are the SAME machine (not the DSM, not a laptop); Play 2
-    # connects LOCALLY; the CI job bind-mounts the host docker socket +
-    # the fixed data dir; bootstrap-runner.sh carries NO Tailscale-SSH
-    # machinery; and the unenforceable same-machine/not-DSM/not-laptop
-    # prereq is prominently documented in BOTH the runbook and the README
-    # (the user explicitly required the README warning so the GitHub
-    # runner is never installed on a Mac "to go fast"). Docs are the only
-    # guard for the prereq, so they are asserted here.
+    # The runner is deployed OVER SSH to GITEA_RUNNER_HOST (a remote host
+    # seeded with Docker + tailnet by runner_host_seed). The controller and
+    # the target are different machines. bootstrap-runner.sh is retired; the
+    # gitea_runner role is a pure consumer (asserts Docker + tailnet). The
+    # registration token is still minted in Play 1 and passed via hostvars.
+    # See docs/runbooks/gitea-runner-host.md.
     - name: "CHECK 8: Read common-bootstrap workflow"
       slurp:
         src: "{{ project_root }}/.github/workflows/common-bootstrap.yml"
@@ -280,25 +280,15 @@
         src: "{{ project_root }}/playbooks/gitea-deploy.yml"
       register: gitea_deploy_raw
 
-    - name: "CHECK 8: Read gitea_runner role defaults"
-      slurp:
-        src: "{{ roles_dir }}/gitea_runner/defaults/main.yml"
-      register: runner_defaults_raw
-
     - name: "CHECK 8: Read gitea_runner role tasks"
       slurp:
         src: "{{ roles_dir }}/gitea_runner/tasks/main.yml"
       register: runner_tasks_raw
 
-    - name: "CHECK 8: Read gitea_runner role meta"
+    - name: "CHECK 8: Read runner_host_seed role tasks"
       slurp:
-        src: "{{ roles_dir }}/gitea_runner/meta/main.yml"
-      register: runner_meta_raw
-
-    - name: "CHECK 8: Read bootstrap-runner.sh"
-      slurp:
-        src: "{{ project_root }}/bootstrap-runner.sh"
-      register: bootstrap_runner_raw
+        src: "{{ roles_dir }}/runner_host_seed/tasks/main.yml"
+      register: seed_tasks_raw
 
     - name: "CHECK 8: Read the runner-host runbook"
       slurp:
@@ -314,133 +304,93 @@
       set_fact:
         common_bootstrap: "{{ common_bootstrap_raw.content | b64decode }}"
         gitea_deploy: "{{ gitea_deploy_raw.content | b64decode }}"
-        runner_defaults: "{{ runner_defaults_raw.content | b64decode }}"
         runner_tasks: "{{ runner_tasks_raw.content | b64decode }}"
-        runner_meta: "{{ runner_meta_raw.content | b64decode }}"
-        bootstrap_runner: "{{ bootstrap_runner_raw.content | b64decode }}"
+        seed_tasks: "{{ seed_tasks_raw.content | b64decode }}"
         runner_runbook: "{{ runner_runbook_raw.content | b64decode }}"
         readme: "{{ readme_raw.content | b64decode }}"
 
-    - name: "CHECK 8: Assert local-connection wiring (no SSH key, no Tailscale SSH)"
+    - name: "CHECK 8: Assert SSH (not local) deploy wiring"
       assert:
         that:
-          - "'GITEA_RUNNER_SSH_KEY' not in common_bootstrap"
-          - "'ansible_ssh_private_key_file' not in common_bootstrap"
-          - "'ansible_connection=local' in common_bootstrap"
-          - "'/var/run/docker.sock:/var/run/docker.sock' in common_bootstrap"
-          - "'/opt/gitea-runner:/opt/gitea-runner' in common_bootstrap"
-          - "'connection: local' in gitea_deploy"
+          - "'GITEA_RUNNER_SSH_KEY' in common_bootstrap"
+          - "'ansible_ssh_private_key_file' in common_bootstrap"
+          - "'ansible_connection=local' not in common_bootstrap"
+          - "'connection: local' not in gitea_deploy"
         fail_msg: >
-          The co-located/local bootstrap wiring regressed:
-          common-bootstrap.yml must use `ansible_connection=local` for
-          [gitea_runner], bind-mount the host docker socket + the
-          /opt/gitea-runner data dir into the CI job, carry no SSH-key
-          wiring, and gitea-deploy.yml Play 2 must be `connection: local`.
-          See docs/runbooks/gitea-runner-host.md.
+          The opportunistic SSH wiring regressed: common-bootstrap.yml must
+          install GITEA_RUNNER_SSH_KEY and set ansible_ssh_private_key_file
+          for [gitea_runner] (NOT ansible_connection=local), and
+          gitea-deploy.yml Play 2 must NOT be connection: local.
 
-    - name: "CHECK 8: Assert fixed host data path (no per-user ~ / ansible_user_dir)"
+    - name: "CHECK 8: Assert the host is seeded before the runner is deployed"
       assert:
         that:
-          - "'/opt/gitea-runner' in runner_defaults"
-          - "'ansible_user_dir' not in runner_defaults"
+          - "'runner_host_seed' in gitea_deploy"
+          - "'gather_facts: true' in gitea_deploy"
         fail_msg: >
-          gitea_runner data path must be a FIXED host path
-          (/opt/gitea-runner), never ansible_user_dir/~ — under
-          connection:local a ~ path resolves to the CI container FS, not
-          the host FS the runner container bind-mounts (the classic
-          bind-source bug). See defaults/main.yml comment.
+          gitea-deploy.yml Play 2 must include the runner_host_seed role
+          (provides Docker + tailnet) and gather_facts (for the arch label).
 
-    - name: "CHECK 8: Assert meta arg-spec is doc-only (no default values; single source = defaults/main.yml)"
+    - name: "CHECK 8: Assert the seed installs Docker SDK + tailnet, runner asserts them"
       assert:
         that:
-          # Ansible argument_specs `default:` is documentation-only and is
-          # never applied at runtime — restating values here just drifts
-          # from defaults/main.yml (the single source of truth). The spec
-          # must declare type/required/description only. (The word
-          # "default" may appear in description prose, but the literal
-          # `default:` KEY must not.)
-          - "'default:' not in runner_meta"
+          - "'docker==' in seed_tasks"
+          - "'tailscale up --authkey' in seed_tasks"
+          - "'docker_host_info' in runner_tasks"
+          - "'tailscale status' in runner_tasks"
         fail_msg: >
-          playbooks/roles/gitea_runner/meta/main.yml reintroduced a
-          `default:` key. argument_specs defaults are doc-only in Ansible;
-          the single source of default VALUES is
-          playbooks/roles/gitea_runner/defaults/main.yml. Remove the
-          default from meta and document it by pointing to defaults/main.yml.
+          runner_host_seed must install the Docker SDK and join the tailnet;
+          the gitea_runner role must ASSERT Docker (docker_host_info) and
+          tailnet (tailscale status) as a pure consumer.
 
     - name: "CHECK 8: Assert the registration token is minted in Play 1, not the role"
       assert:
         that:
-          # The CI container cannot reach the Gitea API. The role must NOT
-          # call the registration-token endpoint or carry an api-base-url
-          # knob; gitea-deploy.yml Play 1 mints it on the NAS (loopback)
-          # and passes it via hostvars (gitea_runner_registration_token).
           - "'registration-token' not in runner_tasks"
-          - "'gitea_runner_api_base_url' not in runner_defaults"
           - "'registration-token' in gitea_deploy"
           - "'gitea_runner_registration_token' in gitea_deploy"
         fail_msg: >
           The runner registration token must be minted by gitea-deploy.yml
-          Play 1 on the NAS (working loopback admin API) and passed to
-          Play 2 via hostvars — the gitea_runner role must NOT call the
-          Gitea API itself (the CI container cannot resolve/reach it; this
-          was the root cause of the first co-located deploy failure). See
-          docs/runbooks/gitea-runner-host.md.
+          Play 1 on the NAS and passed to Play 2 via hostvars; the role must
+          not call the Gitea API.
 
-    - name: "CHECK 8: Assert bootstrap-runner.sh has NO Tailscale-SSH machinery"
-      assert:
-        that:
-          # Contiguous active-command forms (not bare '--ssh', which the
-          # explanatory comments legitimately mention).
-          - "'tailscale up --ssh' not in bootstrap_runner"
-          - "'tailscale set --ssh' not in bootstrap_runner"
-          - "'accept-risk' not in bootstrap_runner"
-          - "'confirm_ssh_enable' not in bootstrap_runner"
-          - "'BOOTSTRAP_RUNNER_ASSUME_YES' not in bootstrap_runner"
-          - "'ensure_data_dir' in bootstrap_runner"
-          - "'tailscale up' in bootstrap_runner"
-        fail_msg: >
-          bootstrap-runner.sh must not enable/manage Tailscale SSH
-          (no `tailscale up/set --ssh`, no accept-risk, no confirm hatch —
-          the connection is local now) and must provision the runner data
-          dir (ensure_data_dir) + ensure plain tailnet membership
-          (`tailscale up`). See docs/runbooks/gitea-runner-host.md.
-
-    - name: "CHECK 8: Assert the same-machine / not-DSM / not-laptop prereq is documented"
-      assert:
-        that:
-          # Runbook: prominent, unenforceable prereq.
-          - "'PREREQUISITES' in runner_runbook"
-          # Single-line phrases (the source is hard-wrapped, so multi-word
-          # asserts must not straddle a line break).
-          - "'GitHub runner host == the Gitea runner host' in runner_runbook"
-          - "'Synology DSM' in runner_runbook"
-          - "'laptop' in runner_runbook"
-          - "'no SSH, no Tailscale SSH, no key' in runner_runbook"
-          # README: the user explicitly required the warning here so the
-          # GitHub runner is never installed on a Mac to go fast.
-          - "'co-located' in readme"
-          - "'NOT your laptop' in readme"
-          - "'host the Gitea runner' in readme"
-        fail_msg: >
-          The same-machine / NOT-the-DSM / NOT-a-laptop co-location
-          prereq must be prominently documented in BOTH
-          docs/runbooks/gitea-runner-host.md and README.md (no script
-          enforces it). The README warning is a hard requirement so the
-          GitHub runner is never installed on a Mac "to go fast".
-
-    - name: "CHECK 8: Assert bootstrap-runner.sh exists and is executable"
+    - name: "CHECK 8: Assert bootstrap-runner.sh is retired"
       stat:
         path: "{{ project_root }}/bootstrap-runner.sh"
       register: bootstrap_runner_stat
 
-    - name: "CHECK 8: Assert bootstrap-runner.sh is present + executable"
+    - name: "CHECK 8: Assert bootstrap-runner.sh no longer exists"
       assert:
         that:
-          - bootstrap_runner_stat.stat.exists
-          - bootstrap_runner_stat.stat.executable
+          - not bootstrap_runner_stat.stat.exists
         fail_msg: >
-          bootstrap-runner.sh (the documented one-time runner-host seed)
-          is missing or not executable.
+          bootstrap-runner.sh must be removed — host seeding is now done by
+          the runner_host_seed role over SSH in the bootstrap CI flow.
+
+    - name: "CHECK 8: Assert the IaC SSH-access seed exists"
+      stat:
+        path: "{{ project_root }}/playbooks/seed-runner-ssh.yml"
+      register: seed_ssh_stat
+
+    - name: "CHECK 8: Assert seed-runner-ssh.yml is present"
+      assert:
+        that:
+          - seed_ssh_stat.stat.exists
+        fail_msg: >
+          playbooks/seed-runner-ssh.yml (the committed idempotent IaC that
+          authorizes the runner public key on the target) must exist.
+
+    - name: "CHECK 8: Assert the target-host contract is documented (SSH + Docker + tailnet, swappable)"
+      assert:
+        that:
+          - "'GITEA_RUNNER_HOST' in runner_runbook"
+          - "'SSH' in runner_runbook"
+          - "'swappable' in runner_runbook"
+          - "'GITEA_RUNNER_HOST' in readme"
+        fail_msg: >
+          docs/runbooks/gitea-runner-host.md and README.md must document the
+          opportunistic target-host contract (reachable over SSH, has Docker,
+          joins the tailnet; host is GITEA_RUNNER_HOST and swappable).
 
     # ================================================================
     # Check 9: Gitea sidecar uses tailscale_accept_dns: true so MagicDNS
