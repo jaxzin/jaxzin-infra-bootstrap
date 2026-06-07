@@ -8,7 +8,7 @@ It is not monolithically responsible for _all_ (IaC) on my personal network. The
 IaC CI/CD repos and workflows. This is meant to ensure I always have a reliable disaster-recovery path.
 
 The only prerequisites to performing a disaster recovery are:
-1. There is an available self-hosted Github runner on the home network, installed on a **dedicated tailnet-joined Linux host (NOT the NAS, NOT a laptop/Mac)** that has been seeded once with `sudo ./bootstrap-runner.sh` — this same host also runs the Gitea runner (see "Self-hosting a GitHub Runner") and...
+1. There is an available self-hosted GitHub runner on the home network (LAN + tailnet reachable), acting as the bootstrap controller. The Gitea Actions runner is deployed from there **over SSH** to a separate host set by the `GITEA_RUNNER_HOST` variable (seeded automatically by the `runner_host_seed` role in CI). See "Self-hosting a GitHub Runner" and...
 2. that runner is attached to the mirror of this repo on Github.com and...
 3. there is a Synology NAS available on the home network...
 4. with the hostname defined in the Github repo’s variable `NAS_HOST` and...
@@ -59,22 +59,24 @@ Makefile                        # Makefile for common tasks
 
 ## Architecture Diagrams
 
-### Container Networking (Tailscale Sidecar Pattern)
+### Container Networking (Gitea sidecar + remote runner)
 
 ```mermaid
 flowchart TB
     subgraph Tailnet["Tailscale Tailnet"]
         TG_TS["tailscale-gitea<br/>(TS_SERVE: HTTPS → HTTP :3000)"]
-        TR_TS["tailscale-runner<br/>(userspace mode, exposes :1055 SOCKS5 / :1099 HTTP CONNECT)"]
+        RunnerHost["GITEA_RUNNER_HOST<br/>(separate Linux host, host-level Tailscale)"]
     end
-    subgraph DockerNet["gitea-net (Docker Bridge)"]
+    subgraph DockerNet["gitea-net (Docker Bridge, on the NAS)"]
         TG_TS --- |"network_mode: container"| Gitea["gitea<br/>(HTTP :3000, SSH :22)"]
         DB["gitea-db<br/>(MySQL :3306)"]
-        Runner["gitea-runner<br/>(Act Runner)"] --- |"on gitea-net"| TR_TS
-        Runner -.->|"HTTPS_PROXY :1099"| TR_TS
+    end
+    subgraph RunnerBox["GITEA_RUNNER_HOST Docker daemon"]
+        Runner["gitea-runner<br/>(act_runner: bridge + /var/run/docker.sock)"]
     end
     Gitea --> |"gitea-db:3306"| DB
-    Runner --> |"https://gitea.tailnet"| TG_TS
+    RunnerHost -. "runs the runner container" .-> Runner
+    Runner --> |"https://gitea.tailnet (via host Tailscale)"| TG_TS
 ```
 
 ### Normal Operation (Happy Path)
@@ -133,19 +135,17 @@ can be found in the [CONTRIBUTING.md](CONTRIBUTING.md) file.
 
 ## Tailscale Integration
 
-Gitea and the Gitea Actions runner are each paired with a [Tailscale](https://tailscale.com) sidecar container that places them on your private Tailscale tailnet. This provides secure, zero-config access to Gitea from any device on your tailnet without exposing it to the public internet.
+Gitea is paired with a [Tailscale](https://tailscale.com) sidecar container that places it on your private Tailscale tailnet, providing secure, zero-config access from any device on your tailnet without exposing it to the public internet. The Gitea Actions runner is **not** a sidecar — it is deployed over SSH to a separate tailnet host (`GITEA_RUNNER_HOST`) and reaches Gitea through that host's own Tailscale (see [docs/runbooks/gitea-runner-host.md](docs/runbooks/gitea-runner-host.md)).
 
 ### How It Works
 
-The two sidecars use **different Tailscale networking modes** because their workloads have different network needs. See [docs/architecture/tailscale-sidecar-modes.md](docs/architecture/tailscale-sidecar-modes.md) for the deep dive.
-
 **Gitea sidecar (kernel-mode, namespace-shared):**
-Gitea shares its network namespace with the `tailscale-gitea` sidecar via Docker's `network_mode: container:` option. The sidecar handles Tailscale connectivity, and [Tailscale Serve](https://tailscale.com/kb/1312/serve) terminates TLS for `https://gitea.<your-tailnet>` with a Tailscale-managed certificate, proxying to Gitea's HTTP port inside the shared namespace. Gitea itself runs plain HTTP internally; all HTTPS for the tailnet is handled by Tailscale Serve. Kernel mode is required here because Tailscale Serve depends on the kernel TUN device.
+Gitea shares its network namespace with the `tailscale-gitea` sidecar via Docker's `network_mode: container:` option. The sidecar handles Tailscale connectivity, and [Tailscale Serve](https://tailscale.com/kb/1312/serve) terminates TLS for `https://gitea.<your-tailnet>` with a Tailscale-managed certificate, proxying to Gitea's HTTP port inside the shared namespace. Gitea itself runs plain HTTP internally; all HTTPS for the tailnet is handled by Tailscale Serve. Kernel mode is required here because Tailscale Serve depends on the kernel TUN device. See [docs/architecture/tailscale-sidecar-modes.md](docs/architecture/tailscale-sidecar-modes.md) for the deep dive.
 
-**Runner sidecar (userspace-mode, multi-network):**
-The `gitea-runner` sits on the same `gitea-net` Docker bridge as the `tailscale-runner` sidecar — NOT in its namespace. This gives `gitea-runner` (and the dind dockerd it embeds) full LAN access through the host's networking stack, which is essential for job containers that need to reach LAN destinations (UniFi controller, NAS DNS, etc.). The runner reaches the tailnet through the sidecar's HTTP-CONNECT/SOCKS5 proxy via `HTTPS_PROXY=http://tailscale-runner:1099` / `ALL_PROXY=socks5://tailscale-runner:1055`. The sidecar runs Tailscale in [userspace networking mode](https://tailscale.com/kb/1112/userspace-networking) to expose those proxy ports to its peers.
+The Gitea sidecar sits on `gitea-net`, which keeps MySQL (`gitea-db:3306`) reachable from Gitea while staying off the tailnet entirely.
 
-Both sidecars sit on `gitea-net`, which keeps MySQL (`gitea-db:3306`) reachable from Gitea while staying off the tailnet entirely.
+**Gitea Actions runner (remote, host-tailnet, socket-mounted):**
+The runner is **not** a sidecar. It is deployed over SSH to `GITEA_RUNNER_HOST` — a separate Linux host that already has Docker and is on the tailnet (seeded by the `runner_host_seed` role). The act_runner container runs with `network_mode: bridge` and bind-mounts the host's Docker socket, so job containers run on the host's own daemon and reach both the LAN and the tailnet directly through the host's networking — no dind, no SOCKS/HTTP proxy, no sidecar. Full contract: [docs/runbooks/gitea-runner-host.md](docs/runbooks/gitea-runner-host.md).
 
 ### Using This Repo as a Template
 
@@ -155,7 +155,7 @@ To set up Tailscale for your own fork:
 2. Generate a **reusable, non-ephemeral** auth key at Settings → Keys in the Tailscale admin console.
 3. Set the `TS_AUTHKEY` **secret** and `TS_TAILNET` **variable** in your GitHub repo settings (see the table below).
 4. Run the bootstrap workflow — Gitea will be available at `https://gitea.<your-tailnet>` from any tailnet device.
-5. The runner will appear as `gitea-runner` on your tailnet.
+5. The runner is deployed to `GITEA_RUNNER_HOST` and reaches Gitea through that host's tailnet.
 
 ### Disabling Tailscale
 
@@ -225,25 +225,15 @@ In GitHub (Settings → Secrets and variables → Actions → Variables):
 
 ### 3. Self-hosting a GitHub Runner
 
-> ## ⚠️ Install the GitHub runner ON the machine that will host the Gitea runner
+> ## ℹ️ The Gitea runner host is remote and swappable
 >
-> The Gitea Actions runner is **co-located** with the GitHub self-hosted
-> runner: the bootstrap deploy reaches it with a **local connection** (no
-> SSH/key) *because they are the same box*. So this is not "any spare
-> machine":
+> The Gitea Actions runner is deployed **over SSH** to `GITEA_RUNNER_HOST`.
+> The controller (the home-network GitHub runner) and the target are
+> **different machines** — no same-box requirement. The target only needs
+> SSH + a sudo user + a Docker-capable Linux host on the tailnet; the
+> `runner_host_seed` role provisions the rest.
 >
-> - ✅ Install it on the **dedicated Linux host** that will run the Gitea
->   runner (a tailnet-joined Linux box — e.g. an always-on mini PC).
-> - ❌ **NOT your laptop/MacBook** "to get things up quickly." It must be
->   Linux (the job runs in a Linux container) and it must be the same
->   long-lived host as the Gitea runner. A laptop runner breaks the whole
->   topology.
-> - ❌ **NOT the Synology NAS/DSM.** The NAS is the *target* of the deploy
->   (Play 1), deliberately decoupled from the runner; co-locating the
->   runner there reintroduces the NAS/dind problems this design removed.
->
-> Full contract and rationale: [docs/runbooks/gitea-runner-host.md](docs/runbooks/gitea-runner-host.md).
-> Seed that host once with `sudo ./bootstrap-runner.sh` (repo root).
+> Full contract: [docs/runbooks/gitea-runner-host.md](docs/runbooks/gitea-runner-host.md).
 
 A self-hosted GitHub runner is required to execute the disaster recovery workflows from GitHub. It must be on a Linux 
 machine with Docker installed (the bootstrap process uses a container, unsupported by GitHub runners on macOS/Windows). 

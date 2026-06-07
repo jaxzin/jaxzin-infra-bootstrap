@@ -13,15 +13,11 @@ jobs:
     container:
       image: ghcr.io/jaxzin/jaxzin-infra-runner:latest
       # Static (NO secret refs) so it is valid at workflow-load time.
-      # Play 2 of gitea-deploy.yml runs in THIS container via
-      # connection:local and drives the co-located HOST Docker daemon:
-      # mount the host docker socket so `community.docker.docker_container`
-      # creates the runner on the host, and mount the runner data dir at
-      # the SAME path so the config the role writes here is the exact
-      # bytes the host bind-mounts into the runner container. Trust
-      # posture (CI gets host-Docker authority on this machine) is
-      # documented in docs/runbooks/gitea-runner-host.md.
-      options: -v /var/run/docker.sock:/var/run/docker.sock -v /opt/gitea-runner:/opt/gitea-runner
+      # Play 2 now deploys the runner over SSH to a REMOTE host
+      # (GITEA_RUNNER_HOST); it no longer drives a same-box host Docker
+      # daemon from inside this container, so no host bind-mounts are needed
+      # here. See docs/runbooks/gitea-runner-host.md.
+      options: ""
       # NOTE: do NOT add `options: --dns ${{ secrets.LAN_DNS }}` here.
       # GitHub Actions evaluates `container.options` at workflow-load time,
       # before any of `secrets`, `inputs.<workflow_call-input>`-passed-from-
@@ -62,6 +58,7 @@ jobs:
       GITEA_RUNNER_IMAGE: ${{ vars.GITEA_RUNNER_IMAGE }}
       GITEA_RUNNER_NAME: ${{ vars.GITEA_RUNNER_NAME }}
       GITEA_RUNNER_DATA_PATH: ${{ vars.GITEA_RUNNER_DATA_PATH }}
+      GITEA_RUNNER_SSH_USER: ${{ vars.GITEA_RUNNER_SSH_USER }}
     steps:
       # Must run BEFORE actions/checkout, which is the first network-using
       # step. /etc/resolv.conf inside a Docker user-defined network is
@@ -99,13 +96,20 @@ jobs:
             echo "Ansible is already available on the PATH."
           fi
 
-      # The Gitea runner is CO-LOCATED with this controller (same machine,
-      # NOT the DSM — see docs/runbooks/gitea-runner-host.md). Play 2 uses
-      # connection:local, so the [gitea_runner] inventory entry needs no
-      # ssh user/args; ansible_connection=local is explicit here as the
-      # operator-boundary statement of the topology. GITEA_RUNNER_HOST is
-      # kept only as a human-readable inventory label (the tailnet name);
-      # GITEA_RUNNER_SSH_USER is no longer used.
+      # The Gitea runner is deployed OVER SSH to GITEA_RUNNER_HOST (a remote
+      # host with Docker + tailnet, seeded by runner_host_seed). The
+      # controller (this home-network GitHub runner) and the target are
+      # different machines. See docs/runbooks/gitea-runner-host.md.
+      - name: Install the Gitea runner SSH key
+        env:
+          GITEA_RUNNER_SSH_KEY: ${{ secrets.GITEA_RUNNER_SSH_KEY }}
+        run: |
+          set -eu
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$GITEA_RUNNER_SSH_KEY" > ~/.ssh/gitea_runner_key
+          chmod 600 ~/.ssh/gitea_runner_key
+
       - name: Deploy infrastructure
         id: deploy
         uses: dawidd6/action-ansible-playbook@v4
@@ -121,6 +125,6 @@ jobs:
             [nas]
             ${{ secrets.NAS_HOST }} ansible_user="${{ secrets.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
             [gitea_runner]
-            ${{ secrets.GITEA_RUNNER_HOST }} ansible_connection=local
+            ${{ secrets.GITEA_RUNNER_HOST }} ansible_user="${{ vars.GITEA_RUNNER_SSH_USER }}" ansible_ssh_private_key_file="~/.ssh/gitea_runner_key" ansible_ssh_common_args="-o StrictHostKeyChecking=accept-new"
           requirements: galaxy-requirements.yml
           options: ${{ inputs.dry_run && '--check --diff' || '' }}

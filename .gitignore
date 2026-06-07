@@ -95,3 +95,7 @@ tofu/**/*.tfvars
 # plan-vs-apply split-brain, and gives the lockfile delta a PR review path
 # for supply-chain integrity. Single-platform CI (self-hosted linux) avoids
 # the multi-platform lock juggling that motivates ignoring it elsewhere.
+
+# Local-only planning artifacts (brainstorming specs / implementation plans).
+# Kept out of this public repo; they reference internal host/network details.
+docs/superpowers/

@@ -349,14 +349,11 @@ def check_j_dockerfile_docker_sdk(errors):
     """Check J: the runner image must pip-install the Docker SDK
     (`docker`).
 
-    gitea-deploy.yml Play 2 (gitea_runner) runs with connection: local
-    inside THIS image, co-located with the Gitea runner, and manages the
-    host Docker daemon via community.docker.docker_container — which
-    imports the `docker` Python SDK (and its `requests` dep). There is no
-    remote host whose Python supplies it. Without this the co-located
-    deploy fails: "Failed to import the required Python library
-    (requests)". Lock it in so a Dockerfile edit can't silently drop it
-    (see docs/runbooks/gitea-runner-host.md).
+    Kept as a lock-in: the Docker SDK is cheap insurance in the runner
+    image. NOTE the primary consumer moved — gitea_runner now deploys over
+    SSH to a remote target, so the TARGET needs the SDK (installed by the
+    runner_host_seed role). This check guards the image-side copy from being
+    dropped accidentally. See docs/runbooks/gitea-runner-host.md.
     """
     try:
         with open(DOCKERFILE_PATH) as fh:

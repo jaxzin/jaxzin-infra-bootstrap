@@ -1,0 +1,30 @@
+---
+# Idempotent SSH-access seed for the Gitea runner host.
+#
+# Authorizes the DEDICATED runner public key (playbooks/files/gitea-runner.pub)
+# for the deploy account on the target, so the bootstrap CI can SSH in as
+# GITEA_RUNNER_SSH_USER with the GITEA_RUNNER_SSH_KEY private key.
+#
+# The authorized account MUST match GITEA_RUNNER_SSH_USER. By default this
+# playbook reads that same env var (falling back to `pi`) so the seeded
+# account and the deploy's login account cannot drift; override with
+# -e runner_ssh_login_user=<user> if needed.
+#
+# Run ONCE by the operator (and on DR) from a machine that already has SSH
+# access to the host — you cannot install the key over the key it installs.
+#   GITEA_RUNNER_SSH_USER=pi ansible-playbook seed-runner-ssh.yml \
+#     -i 'GITEA_RUNNER_HOST,' -u "$GITEA_RUNNER_SSH_USER"
+#
+# The private key lives ONLY in the GITEA_RUNNER_SSH_KEY CI secret. The
+# public key is safe to commit. See docs/runbooks/gitea-runner-host.md.
+- name: Seed SSH access for the Gitea runner deploy
+  hosts: all
+  gather_facts: false
+  vars:
+    runner_ssh_login_user: "{{ lookup('ansible.builtin.env', 'GITEA_RUNNER_SSH_USER') | default('pi', true) }}"
+  tasks:
+    - name: Authorize the dedicated runner public key
+      ansible.posix.authorized_key:
+        user: "{{ runner_ssh_login_user }}"
+        state: present
+        key: "{{ lookup('ansible.builtin.file', 'files/gitea-runner.pub') }}"

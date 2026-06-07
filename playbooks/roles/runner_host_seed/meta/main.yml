@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  author: Brian R. Jackson
+  description: >-
+    Seeds a generic Linux host so it can run the Gitea Actions runner:
+    ensures Docker + the Docker SDK for Python, joins the tailnet via an
+    authkey, and creates the runner data dir. The ONLY unit that installs
+    host packages — gitea_runner is a pure consumer that asserts these.
+    See docs/runbooks/gitea-runner-host.md.
+  license: MIT
+  min_ansible_version: "2.12"
+  platforms:
+    - name: GenericLinux
+      versions:
+        - all

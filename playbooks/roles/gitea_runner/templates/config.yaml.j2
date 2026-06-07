@@ -38,7 +38,10 @@ runner:
     - "docker"
     - "self-hosted"
     - "linux"
-    - "amd64"
+    # Arch derived from the TARGET host facts (x86_64→amd64, aarch64→arm64),
+    # so the runner advertises the arch it actually runs on. Defaults to
+    # amd64 when facts are unavailable (e.g. the static regression render).
+    - "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_architecture | default('x86_64')] | default('amd64') }}"
 
 cache:
   # Enable cache server to use actions/cache.

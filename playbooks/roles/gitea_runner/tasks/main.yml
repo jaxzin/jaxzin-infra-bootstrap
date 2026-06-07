@@ -24,6 +24,25 @@
       CI container cannot reach it. See docs/runbooks/gitea-runner-host.md.
     success_msg: "Runner registration token supplied by the deploy."
 
+- name: Preflight — assert the Docker daemon is reachable on the target
+  # Pure consumer: this role NEVER installs Docker. runner_host_seed (or the
+  # target's own IaC) provides it. Fail fast with an actionable message.
+  community.docker.docker_host_info:
+  register: gitea_runner_docker_info
+  failed_when: gitea_runner_docker_info is failed
+  # If this fails: the target has no working Docker daemon / the SSH user is
+  # not in the docker group. Run runner_host_seed first. See
+  # docs/runbooks/gitea-runner-host.md.
+
+- name: Preflight — assert the host is on the tailnet
+  # The runner CONTAINER egresses to Gitea via the host's kernel-mode
+  # Tailscale. No tailnet → the runner can't reach gitea.<tailnet>.
+  ansible.builtin.command:
+    cmd: tailscale status
+  register: gitea_runner_ts_status
+  changed_when: false
+  failed_when: gitea_runner_ts_status.rc != 0
+
 - name: Ensure Gitea runner config directory exists
   file:
     path: "{{ gitea_runner_config_file_parent }}"

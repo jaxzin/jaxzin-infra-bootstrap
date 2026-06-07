@@ -176,42 +176,39 @@
         - backup_config
 
 # ---------------------------------------------------------------------------
-# Play 2: Gitea Actions runner — co-located with the bootstrap controller,
-# NOT on the Synology NAS.
+# Play 2: Gitea Actions runner — OPPORTUNISTIC, deployed over SSH to a
+# remote host selected by the GITEA_RUNNER_HOST variable (fully swappable).
 #
-# Documented topology contract (docs/runbooks/gitea-runner-host.md):
-#   * The self-hosted GitHub Actions runner (this controller) and the
-#     Gitea runner are the SAME machine, so this play uses
-#     `connection: local` — there is NO ssh / Tailscale SSH / key.
-#   * That machine is NOT the DSM/NAS (the NAS is Play 1's target;
-#     decoupled on purpose).
-#   * The CI job bind-mounts the host Docker socket + the runner data dir
-#     (see .github/workflows/common-bootstrap.yml), so the role — running
-#     in the CI container — drives the HOST Docker daemon and writes the
-#     runner config to a host path the runner container also sees.
+# Topology (docs/runbooks/gitea-runner-host.md):
+#   * The controller (the home-network GitHub self-hosted runner) connects
+#     to GITEA_RUNNER_HOST over SSH. They are DIFFERENT machines.
+#   * runner_host_seed installs the prerequisites (Docker + Docker SDK +
+#     tailnet authkey join + data dir); gitea_runner is a pure consumer
+#     that ASSERTS them and deploys the act_runner container.
+#   * The registration token is still minted in Play 1 on the NAS (loopback
+#     admin API) and borrowed here via hostvars — the role never calls the
+#     Gitea API.
 #
-# DR / steady-state: this play runs in the SAME ansible-playbook
-# invocation as Play 1, so the runner REGISTRATION token that Play 1 just
-# minted on the NAS (loopback admin API) is borrowed across plays via
-# hostvars. The runner role never calls the Gitea API itself — the CI
-# container can't reach it. Running the bootstrap deploy brings the runner
-# online as part of bootstrap; there is no separate "deploy the runner" step.
+# Skipped under GITEA_ACTIONS=true (the github->gitea mirror flow) so a
+# Gitea-side job never redeploys its own runner.
 # ---------------------------------------------------------------------------
-- name: Deploy the Gitea Actions runner
+- name: Seed + deploy the Gitea Actions runner (remote SSH)
   hosts: gitea_runner
-  connection: local # co-located with the controller — see contract above
-  become: false
-  gather_facts: false
+  become: true
+  gather_facts: true # need ansible_architecture for the runner label
   vars_files:
     - vars/main.yml
   vars:
     gitea_runner_token: "{{ hostvars[groups['nas'][0]].gitea_runner_registration_token | default('') }}"
-    # Skip runner provisioning when the deploy is triggered from inside
-    # Gitea Actions (the github->gitea mirror flow); only the GitHub
-    # bootstrap deploy provisions the runner.
+    runner_host_seed_tailscale_authkey: "{{ tailscale_authkey | default('') }}"
     in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true' }}"
 
   tasks:
+    - name: Seed the runner host (Docker + SDK + tailnet + data dir)
+      include_role:
+        name: runner_host_seed
+      when: not in_gitea
+
     - name: Deploy the Gitea runner (bootstrap-from-GitHub only)
       include_role:
         name: gitea_runner

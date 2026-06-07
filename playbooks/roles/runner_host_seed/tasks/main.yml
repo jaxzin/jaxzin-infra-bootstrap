@@ -1,0 +1,85 @@
+---
+# Seed a generic Linux host as a Gitea runner target. Runs over SSH with
+# become. Idempotent. The gitea_runner role ASSERTS what this PROVIDES.
+# See docs/runbooks/gitea-runner-host.md.
+
+- name: Assert a tailnet authkey was provided
+  assert:
+    that:
+      - runner_host_seed_tailscale_authkey | string | length > 0
+    fail_msg: >-
+      runner_host_seed_tailscale_authkey is empty. Pass the TS_AUTHKEY CI
+      secret so this host can join the tailnet (the runner CONTAINER needs
+      tailnet egress to reach Gitea). See docs/runbooks/gitea-runner-host.md.
+
+- name: Ensure Docker Engine is installed (get.docker.com)
+  ansible.builtin.shell: |
+    set -eu
+    if command -v docker >/dev/null 2>&1; then
+      echo "present"
+    else
+      curl -fsSL https://get.docker.com | sh
+      echo "installed"
+    fi
+  register: docker_install
+  changed_when: "'installed' in docker_install.stdout"
+
+- name: Ensure the Docker service is enabled and running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Ensure pip3 is present (for the Docker SDK)
+  ansible.builtin.package:
+    name: python3-pip
+    state: present
+
+- name: Ensure the Docker SDK for Python is installed (community.docker needs it)
+  # community.docker.docker_container runs ON this target over SSH, so the
+  # SDK must live here — not in the controller image. --break-system-packages
+  # satisfies PEP 668 on Debian bookworm / Ubuntu >= 24.04 (the supported
+  # targets). On older distros without that flag this task fails fast — by
+  # design we only target modern, externally-managed-Python hosts.
+  ansible.builtin.pip:
+    name: "docker=={{ runner_host_seed_docker_sdk_version }}"
+    extra_args: --break-system-packages
+
+- name: Ensure Tailscale is installed (tailscale.com/install.sh)
+  ansible.builtin.shell: |
+    set -eu
+    if command -v tailscale >/dev/null 2>&1; then
+      echo "present"
+    else
+      curl -fsSL https://tailscale.com/install.sh | sh
+      echo "installed"
+    fi
+  register: ts_install
+  changed_when: "'installed' in ts_install.stdout"
+
+- name: Ensure tailscaled is enabled and running
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+
+- name: Check current tailnet status
+  ansible.builtin.command:
+    cmd: tailscale status
+  register: ts_status
+  changed_when: false
+  failed_when: false
+
+- name: Join the tailnet (only when not already up)
+  # Kernel mode, no --ssh. Gated on status so re-runs are true no-ops and
+  # the play output reflects a real join only when one happens.
+  ansible.builtin.command:
+    cmd: "tailscale up --authkey {{ runner_host_seed_tailscale_authkey }}"
+  when: ts_status.rc != 0
+  no_log: true
+
+- name: Ensure the runner data dir exists
+  ansible.builtin.file:
+    path: "{{ runner_host_seed_data_path }}"
+    state: directory
+    mode: '0775'
