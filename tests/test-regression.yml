@@ -343,6 +343,28 @@
           the gitea_runner role must ASSERT Docker (docker_host_info) and
           tailnet (tailscale status) as a pure consumer.
 
+    - name: "CHECK 8: Assert shared-host DNS safety (accept-dns off + Gitea /etc/hosts pin)"
+      # A shared runner host (one also running other services) must NOT have
+      # its /etc/resolv.conf clobbered by tailscaled. The seed joins with
+      # --accept-dns (default false); the runner then reaches Gitea via an
+      # explicit etc_hosts pin to Gitea's tailnet IP, which the deploy
+      # captures in Play 1. (Otherwise a co-located service's LAN name
+      # resolution would break.)
+      assert:
+        that:
+          - "'--accept-dns' in seed_tasks"
+          - "'runner_host_seed_accept_dns' in seed_tasks"
+          - "'etc_hosts' in runner_tasks"
+          - "'gitea_runner_gitea_tailnet_ip' in runner_tasks"
+          - "'tailscale ip -4' in gitea_deploy"
+          - "'gitea_runner_gitea_tailnet_ip' in gitea_deploy"
+        fail_msg: >
+          Shared-host DNS safety regressed: runner_host_seed must join with
+          --accept-dns (gated by runner_host_seed_accept_dns) so it does not
+          rewrite the host resolver, the gitea_runner role must pin Gitea via
+          etc_hosts/gitea_runner_gitea_tailnet_ip, and gitea-deploy.yml Play 1
+          must capture Gitea's tailnet IP (tailscale ip -4) and pass it on.
+
     - name: "CHECK 8: Assert the registration token is minted in Play 1, not the role"
       assert:
         that:
