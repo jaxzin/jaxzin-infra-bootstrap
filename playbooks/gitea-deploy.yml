@@ -149,7 +149,7 @@
 
     - name: Expose the Gitea tailnet IP to Play 2
       set_fact:
-        gitea_runner_gitea_tailnet_ip: "{{ gitea_tailnet_ip_result.stdout_lines | first | trim }}"
+        gitea_runner_gitea_tailnet_ip: "{{ gitea_tailnet_ip_result.stdout | trim }}"
       when:
         - not (lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true')
         - gitea_tailnet_ip_result.stdout | default('') | trim | length > 0
