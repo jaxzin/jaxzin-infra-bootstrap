@@ -133,6 +133,27 @@
         gitea_runner_registration_token: "{{ runner_reg_token_result.json.token }}"
       when: not (lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true')
 
+    # Capture Gitea's TAILNET IP from its sidecar so Play 2 can pin
+    # gitea.<tailnet> -> this IP in the runner container's /etc/hosts. This
+    # makes the runner reach Gitea without depending on the runner host
+    # running MagicDNS (the host joins with --accept-dns=false to protect
+    # its own LAN resolution — see runner_host_seed_accept_dns). failed_when
+    # false: if the IP can't be read the runner falls back to host MagicDNS.
+    - name: Capture the Gitea sidecar tailnet IP (for the runner /etc/hosts pin)
+      ansible.builtin.command:
+        cmd: "docker exec {{ tailscale_gitea_container_name }} tailscale ip -4"
+      register: gitea_tailnet_ip_result
+      changed_when: false
+      failed_when: false
+      when: not (lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true')
+
+    - name: Expose the Gitea tailnet IP to Play 2
+      set_fact:
+        gitea_runner_gitea_tailnet_ip: "{{ gitea_tailnet_ip_result.stdout | trim }}"
+      when:
+        - not (lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true')
+        - gitea_tailnet_ip_result.stdout | default('') | trim | length > 0
+
     - name: Configure Gitea Backups
       # NOTE: This is a static import, not an include.
       # It runs before the playbook starts regardless of the order
@@ -201,6 +222,10 @@
   vars:
     gitea_runner_token: "{{ hostvars[groups['nas'][0]].gitea_runner_registration_token | default('') }}"
     runner_host_seed_tailscale_authkey: "{{ tailscale_authkey | default('') }}"
+    # Gitea's tailnet IP (captured in Play 1) → pinned in the runner
+    # container's /etc/hosts so it resolves gitea.<tailnet> without the host
+    # needing MagicDNS. Empty falls back to host DNS.
+    gitea_runner_gitea_tailnet_ip: "{{ hostvars[groups['nas'][0]].gitea_runner_gitea_tailnet_ip | default('') }}"
     in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true' }}"
 
   tasks:
