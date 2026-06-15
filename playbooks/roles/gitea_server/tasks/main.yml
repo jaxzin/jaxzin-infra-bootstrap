@@ -45,6 +45,18 @@
     image: "{{ gitea_db_image }}"
     state: started
     restart_policy: always
+    # Pin json-file logging. The Synology default `db` log driver wedges
+    # (locks/hangs): a wedged driver makes Docker unable to run healthcheck
+    # execs (container flips unhealthy) AND unable to (re)start a container
+    # ("failed to initialize logging driver"), so autoheal's restart leaves
+    # it dead. json-file is local-file logging with rotation, immune to that
+    # wedge. Explicit per-container (not just the daemon default) so it
+    # survives a ContainerManager update resetting the default back to `db`.
+    # (2026-06-15 incident; see also 2026-06-05.)
+    log_driver: json-file
+    log_options:
+      max-size: "10m"
+      max-file: "3"
     memory: "384m"
     memory_swap: "768m"
     networks:
@@ -158,6 +170,12 @@
     image: "{{ gitea_image }}"
     state: started
     restart_policy: always
+    # Pin json-file logging — avoid the Synology `db` log-driver wedge that
+    # breaks healthchecks + restarts. (2026-06-15 incident.)
+    log_driver: json-file
+    log_options:
+      max-size: "10m"
+      max-file: "3"
     network_mode: "container:{{ tailscale_gitea_container_name }}"
     env:
       USER_UID: "1000"
@@ -188,6 +206,12 @@
     image: "{{ gitea_image }}"
     state: started
     restart_policy: always
+    # Pin json-file logging — avoid the Synology `db` log-driver wedge that
+    # breaks healthchecks + restarts. (2026-06-15 incident.)
+    log_driver: json-file
+    log_options:
+      max-size: "10m"
+      max-file: "3"
     memory: "256m"
     memory_swap: "512m"
     networks:
