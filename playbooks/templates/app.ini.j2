@@ -22,6 +22,19 @@ HOST = gitea-db:3306
 NAME = {{ gitea_db_name }}
 USER = {{ gitea_db_user }}
 PASSWD = {{ gitea_db_password }}
+; On an unclean restart (HyperBackup quiesce, a ContainerManager bounce,
+; a host reboot) Docker's restart_policy=always relaunches gitea and
+; gitea-db INDEPENDENTLY — there is no depends_on:service_healthy at
+; restart time (the deploy-time "Wait for gitea-db healthy" gate only runs
+; during an Ansible deploy). MySQL then needs minutes for InnoDB crash
+; recovery while gitea is already up and trying to connect. Gitea's
+; defaults (DB_RETRIES=10 x DB_RETRY_BACKOFF=3s ~= 30s) are far too short:
+; gitea exhausts them, exits, and restart:always crash-loops it for the
+; whole recovery window. 60 x 10s = 600s matches the gitea-db container's
+; healthcheck start_period (10m) and the deploy-time wait gate, so gitea
+; waits out recovery instead of flapping.
+DB_RETRIES = {{ gitea_db_retries | default(60) }}
+DB_RETRY_BACKOFF = {{ gitea_db_retry_backoff | default('10s') }}
 
 [security]
 INSTALL_LOCK = true

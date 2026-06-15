@@ -125,6 +125,21 @@
           - "'SSH_DOMAIN = gitea.test-tailnet.ts.net' in ini_content"
         fail_msg: "app.ini SSH_DOMAIN should use the tailnet domain"
 
+    - name: "CHECK 3: Assert app.ini widens the DB connect retry budget"
+      # Gitea's defaults (DB_RETRIES=10 x DB_RETRY_BACKOFF=3s ~= 30s) are too
+      # short to outlast MySQL's InnoDB crash recovery after an unclean
+      # restart, so gitea exits and restart:always crash-loops it. The
+      # template must widen this to ~10m (60 x 10s) to match the gitea-db
+      # healthcheck start_period and the deploy-time wait gate.
+      assert:
+        that:
+          - "'DB_RETRIES = 60' in ini_content"
+          - "'DB_RETRY_BACKOFF = 10s' in ini_content"
+        fail_msg: >
+          app.ini must set DB_RETRIES=60 and DB_RETRY_BACKOFF=10s (~10m of
+          retries) so gitea waits out MySQL InnoDB crash recovery instead of
+          crash-looping after an unclean restart. Got: {{ ini_content }}
+
     # ================================================================
     # Check 4: ts-serve-gitea.json.j2 renders correctly (Gap 5)
     # ================================================================
@@ -643,6 +658,42 @@
           never 'sed -i'). Without a continuous reconciler the deploy-time fix is
           stripped on the next tailscaled restart and gitea loses gitea-db
           resolution (2026-06-05 incident).
+
+    # ================================================================
+    # Check 16: gitea container healthcheck tolerates slow DB recovery
+    # ================================================================
+    # After an unclean restart, Docker's restart_policy=always relaunches
+    # gitea and gitea-db independently (there is no depends_on:service_healthy
+    # at restart time — that gate only runs during an Ansible deploy). MySQL
+    # needs minutes for InnoDB crash recovery; gitea is up but cannot serve
+    # HTTP until the DB is reachable. With a 2m healthcheck start_period gitea
+    # is marked unhealthy mid-recovery, tripping external monitors / the
+    # sidecar self-heal. The start_period must match the gitea-db recovery
+    # budget (10m) on BOTH the Tailscale and standalone container variants,
+    # paired with the widened DB_RETRIES/DB_RETRY_BACKOFF in app.ini (CHECK 3).
+    - name: "CHECK 16: Read gitea_server tasks/main.yml"
+      slurp:
+        src: "{{ roles_dir }}/gitea_server/tasks/main.yml"
+      register: gitea_server_tasks_raw
+
+    - name: "CHECK 16: Decode gitea_server tasks"
+      set_fact:
+        gitea_server_tasks: "{{ gitea_server_tasks_raw.content | b64decode }}"
+
+    - name: "CHECK 16: Assert gitea healthcheck start_period tolerates DB recovery (10m, both variants)"
+      assert:
+        that:
+          # gitea-db (1) + gitea Tailscale variant (1) + gitea standalone
+          # variant (1) = 3 occurrences once the 2m budgets are raised.
+          - "gitea_server_tasks.count('start_period: 10m') >= 3"
+          - "'start_period: 2m' not in gitea_server_tasks"
+        fail_msg: >
+          gitea_server/tasks/main.yml must use start_period: 10m for the gitea
+          container healthcheck on BOTH the Tailscale and standalone variants
+          (alongside the gitea-db healthcheck) so gitea is not marked unhealthy
+          while MySQL does InnoDB crash recovery after an unclean restart. The
+          old 2m budget is banned. Pairs with the widened DB retry budget in
+          app.ini (CHECK 3).
 
     # ================================================================
     # Cleanup
