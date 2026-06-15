@@ -696,6 +696,35 @@
           app.ini (CHECK 3).
 
     # ================================================================
+    # Check 17: Gitea-stack containers pin the json-file log driver,
+    #           never the Synology `db` driver.
+    # ================================================================
+    # The Synology ContainerManager default `db` log driver wedges
+    # (locks/hangs). A wedged driver makes Docker unable to run healthcheck
+    # execs (container flips unhealthy) and unable to (re)start containers
+    # ("failed to initialize logging driver"), so autoheal's restart leaves
+    # them dead — a recurring NAS-wide outage (2026-06-15 incident; also
+    # 2026-06-05). Every long-lived gitea-stack container must pin
+    # log_driver: json-file explicitly (not merely rely on the daemon
+    # default, which a ContainerManager update can reset back to `db`).
+    # Reuses gitea_server_tasks (decoded in CHECK 16) and tailscale_sidecar_tasks.
+    - name: "CHECK 17: Assert gitea + sidecar containers pin json-file logging"
+      assert:
+        that:
+          # gitea-db, gitea (sidecar variant), gitea (standalone variant) =
+          # 3 occurrences in gitea_server; allow >=3 for future containers.
+          - "gitea_server_tasks.split('log_driver: json-file') | length - 1 >= 3"
+          - "'log_driver: json-file' in tailscale_sidecar_tasks"
+          # Guard the anti-pattern: no container may pin the wedge-prone db driver.
+          - "'log_driver: db' not in gitea_server_tasks"
+          - "'log_driver: db' not in tailscale_sidecar_tasks"
+        fail_msg: >
+          Every long-lived gitea-stack container (gitea-db, gitea, the
+          tailscale-gitea sidecar) must set 'log_driver: json-file'. The
+          Synology default 'db' log driver wedges and breaks healthchecks +
+          restarts, taking the whole stack down (2026-06-15 incident).
+
+    # ================================================================
     # Cleanup
     # ================================================================
     - name: Clean up rendered test files

@@ -33,6 +33,12 @@
     image: "{{ tailscale_image }}"
     state: started
     restart_policy: always
+    # Pin json-file logging — avoid the Synology `db` log-driver wedge that
+    # breaks healthchecks + restarts. (2026-06-15 incident.)
+    log_driver: json-file
+    log_options:
+      max-size: "10m"
+      max-file: "3"
     networks:
       - name: "{{ tailscale_network_name }}"
     ports: "{{ tailscale_host_ports | default([], true) }}"
