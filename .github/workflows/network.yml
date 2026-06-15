@@ -92,7 +92,7 @@ jobs:
           cat /etc/resolv.conf
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install OpenTofu
         uses: opentofu/setup-opentofu@v2
