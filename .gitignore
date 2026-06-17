@@ -100,5 +100,8 @@ tofu/**/*.tfvars
 # Kept out of this public repo; they reference internal host/network details.
 docs/superpowers/
 
-# Local Claude Code agent state (worktrees, settings) — never commit
-.claude/
+# Local Claude Code agent state (worktrees, local settings) — never commit.
+# Exception: .claude/settings.json is shared project config (e.g. enabled
+# plugins / hooks for Claude Code on the web), so it is tracked intentionally.
+.claude/*
+!.claude/settings.json
