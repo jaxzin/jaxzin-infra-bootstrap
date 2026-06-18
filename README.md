@@ -32,12 +32,13 @@ The only prerequisites to performing a disaster recovery are:
 │   ├── mirror-health.yml       # Daily mirror-health check with Discord alert
 │   └── restore.yml             # GitHub-triggered DR restore (recovery phase 2, 🛑 DANGER)
 playbooks/
+├── collections/
+│   └── ansible_collections/jaxzin/infra/  # Vendored jaxzin.infra (tailscale_sidecar, DNS watchdog #7)
 ├── roles/
 │   ├── certbot/                # Let’s Encrypt certificate management
 │   ├── gitea_backup/           # Gitea backup to Backblaze B2
 │   ├── gitea_runner/           # Gitea Actions runner deployment
-│   ├── gitea_server/           # Gitea server + MySQL deployment
-│   └── tailscale_sidecar/      # Reusable Tailscale sidecar container
+│   └── gitea_server/           # Gitea server + MySQL deployment
 ├── templates/
 │   └── app.ini.j2              # Gitea configuration template
 ├── vars/
