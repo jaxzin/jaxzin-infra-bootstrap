@@ -31,10 +31,11 @@ import re
 import sys
 
 ROLES_DIR = "playbooks/roles"
-# tailscale_sidecar now ships from the vendored jaxzin.infra collection, not
-# the local roles/ dir (migrated 2026-06-17; jaxzin.infra#7). ROLES_DIR still
-# serves the other (local) roles + the checks A/C glob.
-COLLECTION_ROLES_DIR = "collections/ansible_collections/jaxzin/infra/roles"
+# tailscale_sidecar now ships from the playbook-adjacent vendored jaxzin.infra
+# collection (playbooks/collections), not the local roles/ dir (migrated
+# 2026-06-17; jaxzin.infra#7). ROLES_DIR still serves the other (local) roles
+# + the checks A/C glob.
+COLLECTION_ROLES_DIR = "playbooks/collections/ansible_collections/jaxzin/infra/roles"
 FORBIDDEN_WITH_CONTAINER_MODE = ["dns_opts", "dns:", "dns_search", "networks", "ports"]
 
 DOCKERFILE_PATH = "Dockerfile"

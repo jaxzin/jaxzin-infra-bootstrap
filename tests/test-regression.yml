@@ -13,7 +13,7 @@
     project_root: "{{ playbook_dir }}/.."
     roles_dir: "{{ project_root }}/playbooks/roles"
     templates_dir: "{{ project_root }}/playbooks/templates"
-    collection_roles_dir: "{{ project_root }}/collections/ansible_collections/jaxzin/infra/roles"
+    collection_roles_dir: "{{ project_root }}/playbooks/collections/ansible_collections/jaxzin/infra/roles"
     # Test-only variables for template rendering (no real domains)
     test_tailnet: "test-tailnet.ts.net"
     test_gitea_domain: "gitea.test-tailnet.ts.net"
