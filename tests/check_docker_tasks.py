@@ -156,9 +156,16 @@ def has_key_in_block(block, key):
 
 
 def has_env_var(block, var_name):
-    """Check if a specific env var key appears in the task's env: block."""
-    text = "\n".join(block)
-    return var_name in text
+    """Check if a specific env var KEY is wired in the task's env: mapping.
+
+    Matches the key form (YAML ``KEY:`` or Jinja-dict ``'KEY':``) and IGNORES
+    comment lines, so a comment that merely mentions the var name cannot make
+    the check pass vacuously. (The vendored tailscale_sidecar role has a comment
+    referencing TS_ACCEPT_DNS; a bare substring match let the real env binding
+    be dropped while Check B stayed green — adversarial-review finding.)
+    """
+    text = "\n".join(line for line in block if not line.lstrip().startswith("#"))
+    return re.search(rf"{re.escape(var_name)}['\"]?\s*:", text) is not None
 
 
 def check_file(filepath, errors, warnings):

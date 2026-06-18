@@ -654,6 +654,26 @@
         success_msg: "jaxzin.infra#7 upstream DNS watchdog present in vendored role."
 
     # ================================================================
+    # Check 17: the Gitea sidecar invocation must NOT disable the
+    #           jaxzin.infra#7 DNS watchdog at the call site. The
+    #           collection default (tailscale_dns_watchdog_enabled:true)
+    #           is what keeps the prod-critical reconcile loop running;
+    #           a future include_role var of `false` would inert it with
+    #           every script-content check (14/15/16) still green.
+    # ================================================================
+    - name: "CHECK 17: Assert gitea-deploy does not disable the DNS watchdog"
+      assert:
+        that:
+          - "'tailscale_dns_watchdog_enabled: false' not in gitea_deploy"
+        fail_msg: >
+          playbooks/gitea-deploy.yml must not set
+          tailscale_dns_watchdog_enabled: false for the Gitea sidecar — that
+          would inert the jaxzin.infra#7 DNS watchdog (re-opening the OIDC-500 /
+          gitea-db resolution incidents) while the watchdog-content checks stay
+          green. Leave it unset to inherit the collection default (true).
+        success_msg: "Gitea sidecar leaves the #7 DNS watchdog enabled (collection default)."
+
+    # ================================================================
     # Cleanup
     # ================================================================
     - name: Clean up rendered test files
