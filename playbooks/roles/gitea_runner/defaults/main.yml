@@ -11,18 +11,15 @@
 # only things this role depends on — are documented in
 # docs/runbooks/gitea-runner-host.md):
 #
-#   1. Linux with a running Docker Engine daemon.
-#   2. The role runs OVER SSH on GITEA_RUNNER_HOST under become: true (the
-#      controller — a separate home-network GitHub runner — connects via
-#      ansible_ssh_private_key_file; see common-bootstrap.yml). community.docker
-#      tasks execute on the TARGET, driving its Docker daemon directly via the
-#      docker group; the runner_host_seed role installs the Docker SDK on the
-#      target first (pip), so it is NOT bundled for this play in the controller
-#      image. The SSH user must be in the docker group.
-#   3. The HOST is a tailnet node (kernel mode) so the runner CONTAINER
-#      can reach Gitea / tailnet at runtime. This role deploys no
-#      Tailscale sidecar and never calls the Gitea API itself (the
-#      registration token is injected — see gitea_runner_token).
+#   1. Linux with a running Docker Engine daemon (provided by
+#      runner_host_seed or the target's own IaC; this role only ASSERTS it).
+#   2. The role is applied OVER SSH to the target (gitea-deploy.yml Play 2,
+#      hosts: gitea_runner) and drives the host Docker daemon there. It is a
+#      pure consumer — it installs nothing.
+#   3. The HOST is a tailnet node (kernel mode) so the runner CONTAINER can
+#      reach Gitea at runtime. This role deploys no Tailscale sidecar and
+#      never calls the Gitea API itself (the registration token is injected
+#      — see gitea_runner_token).
 #   4. A writable data directory for runner state (default below).
 #
 # Anything host-specific (paths, OS package management, kernel quirks) is
@@ -35,15 +32,11 @@
 # value there would just drift. Do not duplicate these literals.
 
 # Where the runner keeps its registration + config + cache. This is a
-# FIXED HOST path on GITEA_RUNNER_HOST, never a per-user ~ dir: the role
-# runs OVER SSH on the target (become: true) and writes here directly,
-# while that SAME host's Docker daemon bind-mounts this path into the
-# runner container — so the bytes are coherent on a single machine.
-# runner_host_seed provisions the directory on the target before this
-# role runs. A ~ path would resolve under the SSH user's home rather than
-# this fixed location, so keep it absolute. Override via the
-# GITEA_RUNNER_DATA_PATH CI variable (passed to the play as an env var in
-# .github/workflows/common-bootstrap.yml).
+# FIXED HOST path on the target, never a per-user ~ dir: the role writes
+# here over SSH (as root via become) and the HOST Docker daemon bind-mounts
+# this SAME path into the runner container, so the bytes are coherent.
+# runner_host_seed creates it. Override via the GITEA_RUNNER_DATA_PATH CI
+# variable (keep runner_host_seed_data_path in sync).
 gitea_runner_data_path: >-
   {{ lookup('ansible.builtin.env', 'GITEA_RUNNER_DATA_PATH')
      | default('/opt/gitea-runner', true) }}
@@ -66,6 +59,18 @@ gitea_runner_name: >-
      | default('gitea-runner', true) }}
 
 # gitea_runner_token is REQUIRED and injected by the deploy (minted in
-# gitea-deploy.yml Play 1 on the NAS, passed via hostvars). This role is
-# API-free by design and does NOT call the Gitea API to mint it. No
-# api-base-url / validate-certs knobs: there is no API call.
+# gitea-deploy.yml Play 1 on the NAS, passed via hostvars). This role does
+# NOT call the Gitea API to mint it. No api-base-url / validate-certs knobs:
+# there is no API call.
+
+# Optional: Gitea's TAILNET IP, used to pin gitea_instance_url's hostname ->
+# this IP in the act_runner container's /etc/hosts. Needed when the runner
+# host joined the tailnet with MagicDNS disabled (--accept-dns=false, the
+# shared-host-safe default — see runner_host_seed_accept_dns): without
+# MagicDNS the container can't resolve gitea.<tailnet>, so we pin it. TLS
+# still validates because the connection uses the hostname (Tailscale Serve
+# cert). Empty = rely on the host's MagicDNS (dedicated-host behaviour).
+# Injected by gitea-deploy.yml Play 1 (captured from the Gitea sidecar).
+gitea_runner_gitea_tailnet_ip: >-
+  {{ lookup('ansible.builtin.env', 'GITEA_RUNNER_GITEA_TAILNET_IP')
+     | default('', true) }}

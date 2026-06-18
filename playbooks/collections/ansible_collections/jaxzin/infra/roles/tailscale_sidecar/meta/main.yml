@@ -1,0 +1,219 @@
+galaxy_info:
+  role_name: tailscale_sidecar
+  author: Brian R. Jackson
+  description: Deploy a Tailscale sidecar container with optional Tailscale Serve reverse proxy
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - all
+    - name: Ubuntu
+      versions:
+        - all
+
+argument_specs:
+  main:
+    short_description: Deploy a Tailscale sidecar container
+    options:
+      tailscale_container_name:
+        type: str
+        required: true
+        description: Name of the Tailscale sidecar Docker container
+
+      tailscale_image:
+        type: str
+        default: "ghcr.io/tailscale/tailscale:latest"
+        description: Tailscale container image
+
+      tailscale_hostname:
+        type: str
+        required: true
+        description: Tailscale hostname for this node on the tailnet
+
+      tailscale_authkey:
+        type: str
+        required: true
+        description: Tailscale auth key (from TS_AUTHKEY env var)
+
+      tailscale_state_dir:
+        type: str
+        required: true
+        description: Host path for Tailscale persistent state
+
+      tailscale_network_name:
+        type: str
+        required: true
+        description: Docker network to attach the sidecar to
+
+      tailscale_serve_enabled:
+        type: bool
+        default: false
+        description: Whether to enable Tailscale Serve (HTTPS reverse proxy)
+
+      tailscale_serve_config_src:
+        type: str
+        default: "ts-serve.json.j2"
+        description: Jinja2 template for the Serve config (relative to role templates/)
+
+      tailscale_serve_config_dir:
+        type: str
+        default: ""
+        description: Host path for the rendered Serve config (required when serve_enabled=true)
+
+      tailscale_serve_domain:
+        type: str
+        default: ""
+        description: >-
+          The FQDN for Tailscale Serve (e.g., myapp.example.ts.net).
+          Required when serve_enabled=true.
+
+      tailscale_serve_proxy_host:
+        type: str
+        default: "127.0.0.1"
+        description: >-
+          Host/IP the Serve proxy target points to.
+          Use 127.0.0.1 when the app shares the sidecar network namespace (network_mode: container:).
+          Use a Docker DNS name (e.g., myapp-server) when containers are on the same Docker network.
+
+      tailscale_serve_proxy_port:
+        type: str
+        default: ""
+        description: Port for the Serve proxy target. Required when serve_enabled=true.
+
+      tailscale_host_ports:
+        type: list
+        elements: str
+        default: []
+        description: >-
+          Host port mappings for the sidecar container (e.g., ["127.0.0.1:8080:8080"]).
+          Only needed if you want localhost access to the proxied service.
+
+      tailscale_extra_args:
+        type: str
+        default: ""
+        description: Extra arguments passed to tailscaled via TS_EXTRA_ARGS
+
+      tailscale_userspace_networking:
+        type: bool
+        default: false
+        description: >-
+          Networking mode. false (default) runs kernel mode: tailscaled brings
+          up a kernel TUN interface, requiring CAP_NET_ADMIN + CAP_SYS_MODULE
+          and the /dev/net/tun device. true runs userspace mode: WireGuard runs
+          entirely in user space, so the role drops those capabilities and the
+          /dev/net/tun mount and exposes a SOCKS5 proxy on :1055 and an outbound
+          HTTP CONNECT proxy on :1099 so peer containers can route outbound
+          tailnet traffic through this sidecar. See
+          https://tailscale.com/kb/1112/userspace-networking
+
+      tailscale_accept_dns:
+        type: bool
+        default: true
+        description: >-
+          Whether tailscaled inside the sidecar takes over /etc/resolv.conf
+          (TS_ACCEPT_DNS). Set to false when the sidecar is on a Docker bridge
+          network and must resolve other containers by name via Docker's
+          embedded DNS at 127.0.0.11 — for example, when
+          tailscale_serve_proxy_host is a Docker DNS name like `myapp-server`.
+          With true (the default), tailscaled rewrites /etc/resolv.conf to
+          point only at 100.100.100.100 (MagicDNS), making Docker DNS
+          unreachable from inside the sidecar.
+
+      tailscale_log_driver:
+        type: str
+        default: "json-file"
+        description: >-
+          Docker logging driver for the sidecar container. Defaults to
+          json-file (local-file logging with rotation) so the container never
+          uses the Synology ContainerManager `db` driver, which wedges and
+          breaks healthchecks and container restarts.
+
+      tailscale_log_options:
+        type: dict
+        default:
+          max-size: "10m"
+          max-file: "3"
+        description: >-
+          Options passed to the logging driver (driver-specific). The default
+          rotates json-file logs at 10 MB, keeping 3 files. Must be compatible
+          with tailscale_log_driver if you override it.
+
+      tailscale_assert_tailnet_route:
+        type: bool
+        default: false
+        description: >-
+          After the sidecar reaches Running, also assert it has at least one
+          tailnet peer (a usable outbound route). Leave false for
+          inbound/Serve-only sidecars, where a single-node or peer-less tailnet
+          is valid and would otherwise fail this check. Set true when workloads
+          proxy outbound through this sidecar so a registered-but-not-routing
+          sidecar (zero peers, ENETUNREACH) fails the play fast.
+
+      tailscale_dns_servers:
+        type: list
+        elements: str
+        default:
+          - "100.100.100.100"
+        description: >-
+          Upstream DNS servers set on the sidecar container (Docker
+          dns_servers). Defaults to MagicDNS (100.100.100.100) so Docker's
+          embedded resolver (127.0.0.11) has a working upstream. Set to [] to
+          leave Docker's default resolver wiring untouched.
+
+      tailscale_dns_watchdog_enabled:
+        type: bool
+        default: true
+        description: >-
+          Enable the DNS self-heal + upstream watchdog Docker healthcheck
+          (issue #7). Keeps Docker's embedded resolver (127.0.0.11) at the top
+          of resolv.conf and, when tailscale_accept_dns is true, detects the
+          empty-DefaultResolvers SERVFAIL condition and bounces accept-dns to
+          force tailscaled to re-apply DNS. Disabling removes BOTH self-heal
+          halves.
+
+      tailscale_dns_probe_name:
+        type: str
+        default: "one.one.one.one"
+        description: >-
+          External hostname the watchdog resolves to verify tailscaled's
+          forwarder has working upstreams. Only used when
+          tailscale_dns_watchdog_enabled and tailscale_accept_dns are true.
+
+      tailscale_dns_probe_resolver:
+        type: str
+        default: "100.100.100.100"
+        description: >-
+          Resolver the watchdog queries for tailscale_dns_probe_name. Defaults
+          to MagicDNS (100.100.100.100) — the resolver tailscaled manages — so
+          querying it directly detects the empty-DefaultResolvers condition.
+          Only used when tailscale_dns_watchdog_enabled and tailscale_accept_dns
+          are true.
+
+      tailscale_dns_watchdog_interval:
+        type: str
+        default: "15s"
+        description: Docker healthcheck interval for the DNS watchdog.
+
+      tailscale_dns_watchdog_timeout:
+        type: str
+        default: "10s"
+        description: Docker healthcheck timeout for the DNS watchdog.
+
+      tailscale_dns_watchdog_retries:
+        type: int
+        default: 3
+        description: >-
+          Docker healthcheck retries before the sidecar is reported unhealthy.
+
+      tailscale_dns_watchdog_start_period:
+        type: str
+        default: "10s"
+        description: Docker healthcheck start period before failures count.
+
+      tailscale_dns_watchdog_host_dir:
+        type: str
+        description: >-
+          Host directory the watchdog script (dns-watchdog.sh) is installed into
+          and bind-mounted from. Defaults (in defaults/main.yml) to a
+          tailscale-dns-watchdog sibling of tailscale_state_dir.

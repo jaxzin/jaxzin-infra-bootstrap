@@ -23,6 +23,11 @@ tailscale_gitea_container_name: "tailscale-gitea"
 tailscale_gitea_hostname: "gitea"
 tailscale_gitea_state_dir: "{{ tailscale_data_path }}/gitea-state"
 tailscale_gitea_serve_config_dir: "{{ tailscale_data_path }}/gitea-serve-config"
+# Host dir for the collection role's DNS-watchdog scratch script
+# (dns-watchdog.sh). Kept inside the Gitea docker tree, a sibling of the
+# sidecar's state + serve dirs. Verifies the issue #128 migration note that
+# tailscale_dns_watchdog_host_dir lands in the expected docker tree.
+tailscale_gitea_dns_watchdog_dir: "{{ tailscale_data_path }}/gitea-dns-watchdog"
 
 # =============================================================================
 # DNS / certificate management

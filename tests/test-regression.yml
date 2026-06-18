@@ -125,12 +125,27 @@
           - "'SSH_DOMAIN = gitea.test-tailnet.ts.net' in ini_content"
         fail_msg: "app.ini SSH_DOMAIN should use the tailnet domain"
 
+    - name: "CHECK 3: Assert app.ini widens the DB connect retry budget"
+      # Gitea's defaults (DB_RETRIES=10 x DB_RETRY_BACKOFF=3s ~= 30s) are too
+      # short to outlast MySQL's InnoDB crash recovery after an unclean
+      # restart, so gitea exits and restart:always crash-loops it. The
+      # template must widen this to ~10m (60 x 10s) to match the gitea-db
+      # healthcheck start_period and the deploy-time wait gate.
+      assert:
+        that:
+          - "'DB_RETRIES = 60' in ini_content"
+          - "'DB_RETRY_BACKOFF = 10s' in ini_content"
+        fail_msg: >
+          app.ini must set DB_RETRIES=60 and DB_RETRY_BACKOFF=10s (~10m of
+          retries) so gitea waits out MySQL InnoDB crash recovery instead of
+          crash-looping after an unclean restart. Got: {{ ini_content }}
+
     # ================================================================
     # Check 4: ts-serve-gitea.json.j2 renders correctly (Gap 5)
     # ================================================================
     - name: "CHECK 4: Render ts-serve-gitea.json.j2"
       template:
-        src: "{{ roles_dir }}/tailscale_sidecar/templates/ts-serve-gitea.json.j2"
+        src: "{{ templates_dir }}/ts-serve-gitea.json.j2"
         dest: "/tmp/test-ts-serve-rendered.json"
       vars:
         tailscale_serve_domain: "{{ test_serve_domain }}"
@@ -160,49 +175,6 @@
         that:
           - "'gitea.test-tailnet.ts.net' in serve_content"
         fail_msg: "ts-serve config should reference the tailnet domain"
-
-    # ================================================================
-    # Check 6: tailscale_sidecar role correctly gates userspace env vars
-    # ================================================================
-    # Static grep over tasks/main.yml — guarantees that the userspace-mode
-    # SOCKS5/HTTP proxy listeners are wired with the documented port
-    # numbers and gated on tailscale_userspace_networking. Catches a
-    # naive refactor that drops the gating or changes a port silently.
-    - name: "CHECK 6: Read tailscale_sidecar tasks/main.yml"
-      slurp:
-        src: "{{ roles_dir }}/tailscale_sidecar/tasks/main.yml"
-      register: tailscale_sidecar_tasks_raw
-
-    - name: "CHECK 6: Decode tailscale_sidecar tasks/main.yml"
-      set_fact:
-        tailscale_sidecar_tasks: "{{ tailscale_sidecar_tasks_raw.content | b64decode }}"
-
-    - name: "CHECK 6: Assert TS_SOCKS5_SERVER is wired to :1055 + userspace gate"
-      assert:
-        that:
-          - "'TS_SOCKS5_SERVER' in tailscale_sidecar_tasks"
-          - "':1055' in tailscale_sidecar_tasks"
-          - "'tailscale_userspace_networking' in tailscale_sidecar_tasks"
-        fail_msg: >
-          tailscale_sidecar/tasks/main.yml must wire TS_SOCKS5_SERVER to
-          ':1055' and gate it on tailscale_userspace_networking.
-
-    - name: "CHECK 6: Assert TS_OUTBOUND_HTTP_PROXY_LISTEN is wired to :1099"
-      assert:
-        that:
-          - "'TS_OUTBOUND_HTTP_PROXY_LISTEN' in tailscale_sidecar_tasks"
-          - "':1099' in tailscale_sidecar_tasks"
-        fail_msg: >
-          tailscale_sidecar/tasks/main.yml must wire
-          TS_OUTBOUND_HTTP_PROXY_LISTEN to ':1099'.
-
-    - name: "CHECK 6: Assert TS_USERSPACE env is wired to the variable"
-      assert:
-        that:
-          - "'TS_USERSPACE' in tailscale_sidecar_tasks"
-        fail_msg: >
-          tailscale_sidecar/tasks/main.yml must export TS_USERSPACE so
-          consumers can opt into userspace mode.
 
     # ================================================================
     # Check 7: gitea_runner config.yaml.j2 renders host-agnostic +
@@ -342,6 +314,28 @@
           runner_host_seed must install the Docker SDK and join the tailnet;
           the gitea_runner role must ASSERT Docker (docker_host_info) and
           tailnet (tailscale status) as a pure consumer.
+
+    - name: "CHECK 8: Assert shared-host DNS safety (accept-dns off + Gitea /etc/hosts pin)"
+      # A shared runner host (one also running other services) must NOT have
+      # its /etc/resolv.conf clobbered by tailscaled. The seed joins with
+      # --accept-dns (default false); the runner then reaches Gitea via an
+      # explicit etc_hosts pin to Gitea's tailnet IP, which the deploy
+      # captures in Play 1. (Otherwise a co-located service's LAN name
+      # resolution would break.)
+      assert:
+        that:
+          - "'--accept-dns' in seed_tasks"
+          - "'runner_host_seed_accept_dns' in seed_tasks"
+          - "'etc_hosts' in runner_tasks"
+          - "'gitea_runner_gitea_tailnet_ip' in runner_tasks"
+          - "'tailscale ip -4' in gitea_deploy"
+          - "'gitea_runner_gitea_tailnet_ip' in gitea_deploy"
+        fail_msg: >
+          Shared-host DNS safety regressed: runner_host_seed must join with
+          --accept-dns (gated by runner_host_seed_accept_dns) so it does not
+          rewrite the host resolver, the gitea_runner role must pin Gitea via
+          etc_hosts/gitea_runner_gitea_tailnet_ip, and gitea-deploy.yml Play 1
+          must capture Gitea's tailnet IP (tailscale ip -4) and pass it on.
 
     - name: "CHECK 8: Assert the registration token is minted in Play 1, not the role"
       assert:
@@ -564,63 +558,176 @@
           blocks Gitea (tier-1/DR-first) from coming up.
 
     # ================================================================
-    # Check 14: Tailscale sidecar restores Docker embedded DNS resolver
-    #           (127.0.0.11) after tailscaled writes resolv.conf.
+    # Check 16: gitea container healthcheck tolerates slow DB recovery
     # ================================================================
-    # With tailscale_accept_dns=true, tailscaled writes resolv.conf and
-    # removes Docker's 127.0.0.11. Without it, containers sharing the
-    # sidecar's netns (e.g. gitea via network_mode:container:) can't
-    # resolve Docker service names like gitea-db, causing DB failures.
-    # The role must: (a) always set dns_servers=['100.100.100.100']
-    # unconditionally (not gated on tailscale_accept_dns) so 127.0.0.11's
-    # upstream is MagicDNS, and (b) inject 127.0.0.11 back after tailscaled
-    # writes resolv.conf when tailscale_accept_dns=true. (2026-05-25 incident)
-    - name: "CHECK 14: Assert tailscale_sidecar restores 127.0.0.11 in resolv.conf"
+    # After an unclean restart, Docker's restart_policy=always relaunches
+    # gitea and gitea-db independently (there is no depends_on:service_healthy
+    # at restart time — that gate only runs during an Ansible deploy). MySQL
+    # needs minutes for InnoDB crash recovery; gitea is up but cannot serve
+    # HTTP until the DB is reachable. With a 2m healthcheck start_period gitea
+    # is marked unhealthy mid-recovery, tripping external monitors / the
+    # sidecar self-heal. The start_period must match the gitea-db recovery
+    # budget (10m) on BOTH the Tailscale and standalone container variants,
+    # paired with the widened DB_RETRIES/DB_RETRY_BACKOFF in app.ini (CHECK 3).
+    - name: "CHECK 16: Read gitea_server tasks/main.yml"
+      slurp:
+        src: "{{ roles_dir }}/gitea_server/tasks/main.yml"
+      register: gitea_server_tasks_raw
+
+    - name: "CHECK 16: Decode gitea_server tasks"
+      set_fact:
+        gitea_server_tasks: "{{ gitea_server_tasks_raw.content | b64decode }}"
+
+    - name: "CHECK 16: Assert gitea healthcheck start_period tolerates DB recovery (10m, both variants)"
       assert:
         that:
-          - "'nameserver 127.0.0.11' in tailscale_sidecar_tasks"
-          - "'Restore Docker embedded DNS resolver' in tailscale_sidecar_tasks"
-          # The OLD dns_servers was a Jinja2 inline-if gated on tailscale_accept_dns;
-          # the new form is an unconditional literal list. Absence of the old
-          # inline-if fragment proves the conditional form was removed.
-          - "'if not (tailscale_accept_dns' not in tailscale_sidecar_tasks"
+          # gitea-db (1) + gitea Tailscale variant (1) + gitea standalone
+          # variant (1) = 3 occurrences once the 2m budgets are raised.
+          - "gitea_server_tasks.count('start_period: 10m') >= 3"
+          - "'start_period: 2m' not in gitea_server_tasks"
         fail_msg: >
-          tailscale_sidecar/tasks/main.yml must: (1) set dns_servers unconditionally
-          to the literal list (no inline-if on tailscale_accept_dns — old conditional
-          form is banned), and (2) have a task named 'Restore Docker embedded DNS
-          resolver' that injects 'nameserver 127.0.0.11' back after tailscaled writes
-          resolv.conf. Without this, deploy fails with "nc: bad address 'gitea-db'"
-          (2026-05-25 incident).
+          gitea_server/tasks/main.yml must use start_period: 10m for the gitea
+          container healthcheck on BOTH the Tailscale and standalone variants
+          (alongside the gitea-db healthcheck) so gitea is not marked unhealthy
+          while MySQL does InnoDB crash recovery after an unclean restart. The
+          old 2m budget is banned. Pairs with the widened DB retry budget in
+          app.ini (CHECK 3).
 
     # ================================================================
-    # Check 15: Tailscale sidecar self-heals resolv.conf continuously,
-    #           not just at deploy time.
+    # Check 17: Gitea-stack containers pin the json-file log driver,
+    #           never the Synology `db` driver.
     # ================================================================
-    # The CHECK 14 post-start task fixes resolv.conf ONCE per deploy, but
-    # tailscaled strips 127.0.0.11 on every restart (container/daemon/host
-    # bounce, tailnet reconnect), so it silently re-breaks between deploys
-    # (2026-06-05 incident: a Synology ContainerManager restart re-triggered
-    # the bug; gitea then failed DB resolution with "lookup gitea-db ...
-    # no such host"). The durable fix is a Docker healthcheck on the sidecar
-    # that re-asserts 127.0.0.11 on a fixed interval forever and reports
-    # healthy iff it's present — a reconcile loop, not a one-shot. This check
-    # locks in that the healthcheck exists AND carries the reconcile write
-    # (presence of 'healthcheck:' alone is insufficient — it must repair).
-    - name: "CHECK 15: Assert tailscale_sidecar healthcheck self-heals resolv.conf"
+    # The Synology ContainerManager default `db` log driver wedges
+    # (locks/hangs). A wedged driver makes Docker unable to run healthcheck
+    # execs (container flips unhealthy) and unable to (re)start containers
+    # ("failed to initialize logging driver"), so autoheal's restart leaves
+    # them dead — a recurring NAS-wide outage (2026-06-15 incident; also
+    # 2026-06-05). Every long-lived gitea-stack container managed HERE must
+    # pin log_driver: json-file explicitly. The Tailscale sidecar is now
+    # deployed by jaxzin.infra.tailscale_sidecar, which defaults
+    # tailscale_log_driver: json-file (the collection owns that guarantee).
+    # Reuses gitea_server_tasks (decoded in CHECK 16).
+    - name: "CHECK 17: Assert gitea-stack containers pin json-file logging"
       assert:
         that:
-          - "'healthcheck:' in tailscale_sidecar_tasks"
-          # The healthcheck must carry the in-place reconcile write, proving it
-          # repairs rather than merely probing. The redirect to /tmp/resolv_new
-          # is the signature of the open+truncate (non-rename) write pattern.
-          - "'/tmp/resolv_new' in tailscale_sidecar_tasks"
+          # gitea-db, gitea (sidecar variant), gitea (standalone variant) =
+          # 3 occurrences in gitea_server; allow >=3 for future containers.
+          - "gitea_server_tasks.split('log_driver: json-file') | length - 1 >= 3"
+          # Guard the anti-pattern: no container may pin the wedge-prone db driver.
+          - "'log_driver: db' not in gitea_server_tasks"
         fail_msg: >
-          tailscale_sidecar/tasks/main.yml must have a Docker healthcheck on the
-          sidecar that continuously reconciles resolv.conf (re-prepends
-          'nameserver 127.0.0.11' via the /tmp/resolv_new open+truncate write,
-          never 'sed -i'). Without a continuous reconciler the deploy-time fix is
-          stripped on the next tailscaled restart and gitea loses gitea-db
-          resolution (2026-06-05 incident).
+          Every long-lived gitea-stack container managed in gitea_server
+          (gitea-db, gitea) must set 'log_driver: json-file'. The Synology
+          default 'db' log driver wedges and breaks healthchecks + restarts,
+          taking the whole stack down (2026-06-15 incident).
+
+    # ================================================================
+    # Check 18: the Tailscale sidecar is deployed by the pinned
+    #           jaxzin.infra collection role, not a local copy (#128)
+    # ================================================================
+    # The local playbooks/roles/tailscale_sidecar was retired in favour of
+    # jaxzin.infra.tailscale_sidecar (pinned). This check locks in the
+    # migration contract: the playbook includes the FQCN role (never the bare
+    # local name), gates it at play level (the collection role has no internal
+    # tailscale_enabled), preserves the outbound-route assert + DNS watchdog
+    # wiring, the collection is pinned in galaxy-requirements, and neither the
+    # local role nor the stale vendored collection copy survive.
+    - name: "CHECK 18: Read gitea-deploy.yml + galaxy-requirements.yml"
+      slurp:
+        src: "{{ item }}"
+      register: migration_sources_raw
+      loop:
+        - "{{ project_root }}/playbooks/gitea-deploy.yml"
+        - "{{ project_root }}/playbooks/galaxy-requirements.yml"
+
+    - name: "CHECK 18: Decode migration sources"
+      set_fact:
+        migration_deploy: "{{ migration_sources_raw.results[0].content | b64decode }}"
+        migration_galaxy: "{{ migration_sources_raw.results[1].content | b64decode }}"
+
+    - name: "CHECK 18: Assert the playbook consumes the pinned collection role"
+      assert:
+        that:
+          - "'jaxzin.infra.tailscale_sidecar' in migration_deploy"
+          - "'name: tailscale_sidecar' not in migration_deploy"
+          - "'tailscale_assert_tailnet_route: true' in migration_deploy"
+          - "'tailscale_dns_watchdog_host_dir' in migration_deploy"
+          - "'when: tailscale_enabled | bool' in migration_deploy"
+          - "'tailscale_memory_limit: \"0\"' in migration_deploy"
+          - "'tailscale_memory_swap: \"0\"' in migration_deploy"
+          - "'jaxzin.infra' not in migration_galaxy"
+        fail_msg: >
+          gitea-deploy.yml must include jaxzin.infra.tailscale_sidecar (FQCN,
+          never the bare local 'name: tailscale_sidecar'), set
+          tailscale_assert_tailnet_route: true and tailscale_dns_watchdog_host_dir
+          for the Gitea sidecar, gate the include with
+          'when: tailscale_enabled | bool', and un-cap tailscaled by setting BOTH
+          tailscale_memory_limit: "0" and tailscale_memory_swap: "0" (the
+          collection's 96m/192m defaults would newly OOM-cap the sidecar). The
+          collection is now VENDORED playbook-adjacent (DR-self-contained), NOT
+          galaxy-fetched, so jaxzin.infra must NOT appear in
+          galaxy-requirements.yml (#128).
+
+    - name: "CHECK 18: Assert the local role is deleted"
+      stat:
+        path: "{{ roles_dir }}/tailscale_sidecar"
+      register: local_sidecar_role_stat
+
+    - name: "CHECK 18: Stat the stale root-level vendored collection copy"
+      stat:
+        path: "{{ project_root }}/collections/ansible_collections/jaxzin/infra"
+      register: old_root_collection_stat
+
+    - name: "CHECK 18: Stat the playbook-adjacent vendored collection"
+      stat:
+        path: "{{ project_root }}/playbooks/collections/ansible_collections/jaxzin/infra/galaxy.yml"
+      register: vendored_collection_stat
+
+    - name: "CHECK 18: Assert the collection is vendored playbook-adjacent (DR-self-contained)"
+      assert:
+        that:
+          - not local_sidecar_role_stat.stat.exists
+          - not old_root_collection_stat.stat.exists
+          - vendored_collection_stat.stat.exists
+        fail_msg: >
+          The retired local role (playbooks/roles/tailscale_sidecar) and the
+          stale root-level collection copy
+          (collections/ansible_collections/jaxzin/infra) must both be gone, and
+          the jaxzin.infra collection MUST be vendored playbook-adjacent at
+          playbooks/collections/ansible_collections/jaxzin/infra (galaxy.yml
+          present) so the deploy + offline tests resolve the FQCN with no Galaxy
+          fetch (DR-self-contained, #128).
+
+    # ================================================================
+    # Check 19: the vendored tailscale_sidecar keeps the jaxzin.infra#7
+    #           DNS watchdog — downstream 127.0.0.11 resolv.conf heal +
+    #           upstream accept-dns bounce on MagicDNS SERVFAIL. Without
+    #           it a sidecar restart re-breaks Gitea OIDC login (500).
+    # ================================================================
+    - name: "CHECK 19: Read the vendored dns-watchdog.sh"
+      ansible.builtin.slurp:
+        src: "{{ project_root }}/playbooks/collections/ansible_collections/jaxzin/infra/roles/tailscale_sidecar/files/dns-watchdog.sh"
+      register: dns_watchdog_raw
+
+    - name: "CHECK 19: Decode dns-watchdog.sh"
+      ansible.builtin.set_fact:
+        dns_watchdog_sh: "{{ dns_watchdog_raw.content | b64decode }}"
+
+    - name: "CHECK 19: Assert the #7 watchdog (downstream heal + upstream accept-dns bounce) is present"
+      ansible.builtin.assert:
+        that:
+          - "'127.0.0.11' in dns_watchdog_sh"
+          - "'heal_resolv_conf' in dns_watchdog_sh"
+          - "'accept-dns=false' in dns_watchdog_sh"
+          - "'bounce_accept_dns' in dns_watchdog_sh"
+          - "'probe_upstream' in dns_watchdog_sh"
+        fail_msg: >
+          The vendored tailscale_sidecar lost the jaxzin.infra#7 DNS watchdog:
+          dns-watchdog.sh must keep the downstream 127.0.0.11 resolv.conf heal
+          (heal_resolv_conf) AND the upstream watchdog (probe_upstream +
+          bounce_accept_dns / accept-dns=false). Without it a sidecar restart
+          re-breaks Gitea OIDC (500) and gitea-db resolution.
+        success_msg: "jaxzin.infra#7 DNS watchdog present in the vendored role."
 
     # ================================================================
     # Cleanup

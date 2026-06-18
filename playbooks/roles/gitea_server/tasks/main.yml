@@ -45,6 +45,18 @@
     image: "{{ gitea_db_image }}"
     state: started
     restart_policy: always
+    # Pin json-file logging. The Synology default `db` log driver wedges
+    # (locks/hangs): a wedged driver makes Docker unable to run healthcheck
+    # execs (container flips unhealthy) AND unable to (re)start a container
+    # ("failed to initialize logging driver"), so autoheal's restart leaves
+    # it dead. json-file is local-file logging with rotation, immune to that
+    # wedge. Explicit per-container (not just the daemon default) so it
+    # survives a ContainerManager update resetting the default back to `db`.
+    # (2026-06-15 incident; see also 2026-06-05.)
+    log_driver: json-file
+    log_options:
+      max-size: "10m"
+      max-file: "3"
     memory: "384m"
     memory_swap: "768m"
     networks:
@@ -158,6 +170,12 @@
     image: "{{ gitea_image }}"
     state: started
     restart_policy: always
+    # Pin json-file logging — avoid the Synology `db` log-driver wedge that
+    # breaks healthchecks + restarts. (2026-06-15 incident.)
+    log_driver: json-file
+    log_options:
+      max-size: "10m"
+      max-file: "3"
     network_mode: "container:{{ tailscale_gitea_container_name }}"
     env:
       USER_UID: "1000"
@@ -171,7 +189,13 @@
       interval: 30s
       timeout: 8s
       retries: 3
-      start_period: 2m
+      # 10m (not 2m): after an unclean restart Docker relaunches gitea and
+      # gitea-db independently (no depends_on:service_healthy at restart
+      # time), so gitea is up but cannot serve HTTP until MySQL finishes
+      # InnoDB crash recovery. A 2m start_period marks gitea unhealthy
+      # mid-recovery (tripping monitors / the sidecar self-heal). Matches
+      # the gitea-db start_period and gitea's DB_RETRIES budget (app.ini).
+      start_period: 10m
   when: tailscale_enabled | default(false) | bool
   tags: gitea
   notify: Restart Gitea
@@ -182,6 +206,12 @@
     image: "{{ gitea_image }}"
     state: started
     restart_policy: always
+    # Pin json-file logging — avoid the Synology `db` log-driver wedge that
+    # breaks healthchecks + restarts. (2026-06-15 incident.)
+    log_driver: json-file
+    log_options:
+      max-size: "10m"
+      max-file: "3"
     memory: "256m"
     memory_swap: "512m"
     networks:
@@ -202,7 +232,13 @@
       interval: 30s
       timeout: 8s
       retries: 3
-      start_period: 2m
+      # 10m (not 2m): after an unclean restart Docker relaunches gitea and
+      # gitea-db independently (no depends_on:service_healthy at restart
+      # time), so gitea is up but cannot serve HTTP until MySQL finishes
+      # InnoDB crash recovery. A 2m start_period marks gitea unhealthy
+      # mid-recovery (tripping monitors / the sidecar self-heal). Matches
+      # the gitea-db start_period and gitea's DB_RETRIES budget (app.ini).
+      start_period: 10m
   when: not (tailscale_enabled | default(false) | bool)
   tags: gitea
   notify: Restart Gitea

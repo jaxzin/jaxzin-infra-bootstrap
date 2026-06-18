@@ -72,16 +72,34 @@
 
     - name: Deploy Tailscale sidecar for Gitea
       include_role:
-        name: tailscale_sidecar
+        name: jaxzin.infra.tailscale_sidecar
       vars:
         tailscale_container_name: "{{ tailscale_gitea_container_name }}"
         tailscale_hostname: "{{ tailscale_gitea_hostname }}"
         tailscale_state_dir: "{{ tailscale_gitea_state_dir }}"
         tailscale_serve_enabled: true
-        tailscale_serve_config_src: "ts-serve-gitea.json.j2"
+        # Absolute path so the collection role's template lookup resolves this
+        # bootstrap-specific Serve config (the collection's own templates/ dir
+        # ships only the generic ts-serve.json.j2, which lacks the tailnet-side
+        # SSH TCP forward below).
+        tailscale_serve_config_src: "{{ playbook_dir }}/templates/ts-serve-gitea.json.j2"
         tailscale_serve_config_dir: "{{ tailscale_gitea_serve_config_dir }}"
         tailscale_serve_domain: "{{ gitea_domain }}"
         tailscale_serve_proxy_port: "3000"
+        # Keep the collection's DNS-watchdog scratch dir inside the Gitea
+        # docker tree (issue #128 migration note).
+        tailscale_dns_watchdog_host_dir: "{{ tailscale_gitea_dns_watchdog_dir }}"
+        # Preserve today's UNCAPPED sidecar (measured live: mem=0 swap=0). The
+        # collection defaults (memory_limit=96m, memory_swap=192m) would newly
+        # OOM-cap tailscaled — an OOM-kill re-breaks DNS, the exact failure this
+        # migration exists to fix. Set BOTH to "0": memory="0" is Docker
+        # "unlimited", which must pair with memory_swap="0".
+        tailscale_memory_limit: "0"
+        tailscale_memory_swap: "0"
+        # This sidecar proxies outbound, so preserve the "registered but NOT
+        # routing -> ENETUNREACH" guard. The collection defaults this false
+        # for Serve-only sidecars (issue #128 migration note).
+        tailscale_assert_tailnet_route: true
         # true: tailscaled applies the tailnet's global nameservers (Cloudflare
         # 1.1.1.1 via "Override DNS servers" in the admin console) as upstream
         # forwarders for 100.100.100.100. This gives the container all three:
@@ -102,9 +120,12 @@
           # tailnet-side ssh://git@gitea.<tailnet>:22/... flow). LAN traffic
           # arriving on :22 finds no matching listener and gets RST. Gitea
           # itself listens on :::2222 (app.ini SSH_LISTEN_PORT). Same variable
-          # as line 76's tailscale_serve_ssh_forward_port keeps both paths
-          # consistent.
+          # as tailscale_serve_ssh_forward_port keeps both paths consistent.
           - "{{ gitea_lan_host }}:{{ gitea_lan_ssh_port }}:{{ gitea_ssh_listen_port }}"
+      # The collection role has no internal tailscale_enabled; gate the include
+      # at play level so the role is a no-op when Tailscale is disabled
+      # (issue #128 migration note).
+      when: tailscale_enabled | bool
 
     - name: Include gitea_server role
       include_role:
@@ -132,6 +153,27 @@
       set_fact:
         gitea_runner_registration_token: "{{ runner_reg_token_result.json.token }}"
       when: not (lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true')
+
+    # Capture Gitea's TAILNET IP from its sidecar so Play 2 can pin
+    # gitea.<tailnet> -> this IP in the runner container's /etc/hosts. This
+    # makes the runner reach Gitea without depending on the runner host
+    # running MagicDNS (the host joins with --accept-dns=false to protect
+    # its own LAN resolution — see runner_host_seed_accept_dns). failed_when
+    # false: if the IP can't be read the runner falls back to host MagicDNS.
+    - name: Capture the Gitea sidecar tailnet IP (for the runner /etc/hosts pin)
+      ansible.builtin.command:
+        cmd: "docker exec {{ tailscale_gitea_container_name }} tailscale ip -4"
+      register: gitea_tailnet_ip_result
+      changed_when: false
+      failed_when: false
+      when: not (lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true')
+
+    - name: Expose the Gitea tailnet IP to Play 2
+      set_fact:
+        gitea_runner_gitea_tailnet_ip: "{{ gitea_tailnet_ip_result.stdout | trim }}"
+      when:
+        - not (lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true')
+        - gitea_tailnet_ip_result.stdout | default('') | trim | length > 0
 
     - name: Configure Gitea Backups
       # NOTE: This is a static import, not an include.
@@ -201,6 +243,10 @@
   vars:
     gitea_runner_token: "{{ hostvars[groups['nas'][0]].gitea_runner_registration_token | default('') }}"
     runner_host_seed_tailscale_authkey: "{{ tailscale_authkey | default('') }}"
+    # Gitea's tailnet IP (captured in Play 1) → pinned in the runner
+    # container's /etc/hosts so it resolves gitea.<tailnet> without the host
+    # needing MagicDNS. Empty falls back to host DNS.
+    gitea_runner_gitea_tailnet_ip: "{{ hostvars[groups['nas'][0]].gitea_runner_gitea_tailnet_ip | default('') }}"
     in_gitea: "{{ lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true' }}"
 
   tasks:
