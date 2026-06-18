@@ -653,36 +653,81 @@
           - "'tailscale_assert_tailnet_route: true' in migration_deploy"
           - "'tailscale_dns_watchdog_host_dir' in migration_deploy"
           - "'when: tailscale_enabled | bool' in migration_deploy"
-          - "'jaxzin.infra' in migration_galaxy"
-          - "'1.6.0' in migration_galaxy"
+          - "'tailscale_memory_limit: \"0\"' in migration_deploy"
+          - "'tailscale_memory_swap: \"0\"' in migration_deploy"
+          - "'jaxzin.infra' not in migration_galaxy"
         fail_msg: >
           gitea-deploy.yml must include jaxzin.infra.tailscale_sidecar (FQCN,
           never the bare local 'name: tailscale_sidecar'), set
           tailscale_assert_tailnet_route: true and tailscale_dns_watchdog_host_dir
           for the Gitea sidecar, gate the include with
-          'when: tailscale_enabled | bool', and galaxy-requirements.yml must pin
-          jaxzin.infra at 1.6.0 (#128).
+          'when: tailscale_enabled | bool', and un-cap tailscaled by setting BOTH
+          tailscale_memory_limit: "0" and tailscale_memory_swap: "0" (the
+          collection's 96m/192m defaults would newly OOM-cap the sidecar). The
+          collection is now VENDORED playbook-adjacent (DR-self-contained), NOT
+          galaxy-fetched, so jaxzin.infra must NOT appear in
+          galaxy-requirements.yml (#128).
 
     - name: "CHECK 18: Assert the local role is deleted"
       stat:
         path: "{{ roles_dir }}/tailscale_sidecar"
       register: local_sidecar_role_stat
 
-    - name: "CHECK 18: Assert the stale vendored collection copy is deleted"
+    - name: "CHECK 18: Stat the stale root-level vendored collection copy"
       stat:
         path: "{{ project_root }}/collections/ansible_collections/jaxzin/infra"
+      register: old_root_collection_stat
+
+    - name: "CHECK 18: Stat the playbook-adjacent vendored collection"
+      stat:
+        path: "{{ project_root }}/playbooks/collections/ansible_collections/jaxzin/infra/galaxy.yml"
       register: vendored_collection_stat
 
-    - name: "CHECK 18: Assert both retired copies are gone"
+    - name: "CHECK 18: Assert the collection is vendored playbook-adjacent (DR-self-contained)"
       assert:
         that:
           - not local_sidecar_role_stat.stat.exists
-          - not vendored_collection_stat.stat.exists
+          - not old_root_collection_stat.stat.exists
+          - vendored_collection_stat.stat.exists
         fail_msg: >
           The retired local role (playbooks/roles/tailscale_sidecar) and the
-          stale vendored collection copy
-          (collections/ansible_collections/jaxzin/infra) must both be deleted —
-          the sidecar now comes from the pinned jaxzin.infra collection (#128).
+          stale root-level collection copy
+          (collections/ansible_collections/jaxzin/infra) must both be gone, and
+          the jaxzin.infra collection MUST be vendored playbook-adjacent at
+          playbooks/collections/ansible_collections/jaxzin/infra (galaxy.yml
+          present) so the deploy + offline tests resolve the FQCN with no Galaxy
+          fetch (DR-self-contained, #128).
+
+    # ================================================================
+    # Check 19: the vendored tailscale_sidecar keeps the jaxzin.infra#7
+    #           DNS watchdog — downstream 127.0.0.11 resolv.conf heal +
+    #           upstream accept-dns bounce on MagicDNS SERVFAIL. Without
+    #           it a sidecar restart re-breaks Gitea OIDC login (500).
+    # ================================================================
+    - name: "CHECK 19: Read the vendored dns-watchdog.sh"
+      ansible.builtin.slurp:
+        src: "{{ project_root }}/playbooks/collections/ansible_collections/jaxzin/infra/roles/tailscale_sidecar/files/dns-watchdog.sh"
+      register: dns_watchdog_raw
+
+    - name: "CHECK 19: Decode dns-watchdog.sh"
+      ansible.builtin.set_fact:
+        dns_watchdog_sh: "{{ dns_watchdog_raw.content | b64decode }}"
+
+    - name: "CHECK 19: Assert the #7 watchdog (downstream heal + upstream accept-dns bounce) is present"
+      ansible.builtin.assert:
+        that:
+          - "'127.0.0.11' in dns_watchdog_sh"
+          - "'heal_resolv_conf' in dns_watchdog_sh"
+          - "'accept-dns=false' in dns_watchdog_sh"
+          - "'bounce_accept_dns' in dns_watchdog_sh"
+          - "'probe_upstream' in dns_watchdog_sh"
+        fail_msg: >
+          The vendored tailscale_sidecar lost the jaxzin.infra#7 DNS watchdog:
+          dns-watchdog.sh must keep the downstream 127.0.0.11 resolv.conf heal
+          (heal_resolv_conf) AND the upstream watchdog (probe_upstream +
+          bounce_accept_dns / accept-dns=false). Without it a sidecar restart
+          re-breaks Gitea OIDC (500) and gitea-db resolution.
+        success_msg: "jaxzin.infra#7 DNS watchdog present in the vendored role."
 
     # ================================================================
     # Cleanup
