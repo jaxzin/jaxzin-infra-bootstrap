@@ -1,0 +1,8 @@
+# ansible-lint / ansible-galaxy install cache
+.ansible/
+
+# Collection build artifacts
+*.tar.gz
+
+# semantic-release / Node release tooling
+node_modules/

@@ -1,0 +1,82 @@
+---
+tailscale_image: "ghcr.io/tailscale/tailscale:latest"
+tailscale_serve_enabled: false
+tailscale_serve_config_src: "ts-serve.json.j2"
+tailscale_serve_config_dir: ""
+tailscale_serve_domain: ""
+tailscale_serve_proxy_host: "127.0.0.1"
+tailscale_serve_proxy_port: ""
+tailscale_host_ports: []
+tailscale_extra_args: ""
+
+# Networking mode. false (default) = kernel mode: tailscaled brings up a kernel
+# TUN interface, which needs CAP_NET_ADMIN + CAP_SYS_MODULE and the
+# /dev/net/tun device. true = userspace mode: WireGuard runs entirely in user
+# space, so the role drops those capabilities and the /dev/net/tun mount and
+# exposes a SOCKS5 proxy on :1055 and an outbound HTTP CONNECT proxy on :1099 so
+# peer containers can route outbound tailnet traffic through this sidecar.
+# https://tailscale.com/kb/1112/userspace-networking
+tailscale_userspace_networking: false
+
+# Whether tailscaled inside the sidecar should take over /etc/resolv.conf.
+# Set to false when the sidecar lives on a Docker bridge network and must
+# resolve other containers by name via Docker's embedded DNS at 127.0.0.11
+# (e.g., when tailscale_serve_proxy_host is a Docker DNS name like
+# `myapp-server`). With true (the default, preserving prior behavior),
+# tailscaled rewrites /etc/resolv.conf to point only at 100.100.100.100,
+# which makes Docker DNS unreachable from inside the sidecar.
+tailscale_accept_dns: true
+
+# Container resource limits
+tailscale_memory_limit: "96m"
+tailscale_memory_swap: "192m"
+
+# Container logging. Pin json-file (local-file) logging by default so the
+# sidecar never lands on the Synology ContainerManager `db` log driver,
+# which wedges (locks/hangs) and breaks both healthcheck execs and container
+# (re)starts. Consumers may override per deploy.
+tailscale_log_driver: "json-file"
+tailscale_log_options:
+  max-size: "10m"
+  max-file: "3"
+
+# After the sidecar reaches Running, also assert it has at least one tailnet
+# peer (a usable OUTBOUND route). Leave false for inbound/Serve-only sidecars,
+# where a single-node or peer-less tailnet is valid and would otherwise fail
+# this check. Set true when workloads proxy outbound through this sidecar so a
+# "registered but not routing" sidecar (zero peers -> ENETUNREACH) fails the
+# play fast instead of failing opaquely later.
+tailscale_assert_tailnet_route: false
+
+# --- DNS self-heal & upstream watchdog (issue #7) ---
+# Upstream DNS servers set on the sidecar container (Docker dns_servers).
+# Defaults to MagicDNS so Docker's embedded resolver (127.0.0.11) has a working
+# upstream: Docker names -> 127.0.0.11; tailnet/external -> 127.0.0.11 ->
+# 100.100.100.100 -> Cloudflare. Set to [] to leave Docker's default wiring.
+tailscale_dns_servers:
+  - "100.100.100.100"
+
+# Master toggle for the DNS self-heal + upstream watchdog Docker healthcheck.
+# Disabling removes BOTH self-heal halves (downstream resolv.conf heal and the
+# upstream forwarder watchdog), since Docker allows only one healthcheck.
+tailscale_dns_watchdog_enabled: true
+
+# External name the watchdog resolves to verify tailscaled's forwarder has
+# working upstreams. Only used when both tailscale_dns_watchdog_enabled and
+# tailscale_accept_dns are true.
+tailscale_dns_probe_name: "one.one.one.one"
+# Resolver the watchdog queries for tailscale_dns_probe_name. Defaults to
+# MagicDNS (100.100.100.100) — the resolver tailscaled manages — so querying
+# it directly detects the empty-DefaultResolvers condition.
+tailscale_dns_probe_resolver: "100.100.100.100"
+
+# Docker healthcheck cadence for the watchdog.
+tailscale_dns_watchdog_interval: "15s"
+tailscale_dns_watchdog_timeout: "10s"
+tailscale_dns_watchdog_retries: 3
+tailscale_dns_watchdog_start_period: "10s"
+
+# Host directory the watchdog script (dns-watchdog.sh) is installed into and
+# bind-mounted from. Defaults to a sibling of the state dir so it lands in the
+# operator's docker tree (e.g. /volume1/docker/myapp/tailscale-dns-watchdog).
+tailscale_dns_watchdog_host_dir: "{{ tailscale_state_dir | dirname }}/tailscale-dns-watchdog"

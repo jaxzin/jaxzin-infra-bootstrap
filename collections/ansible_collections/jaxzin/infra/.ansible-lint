@@ -1,0 +1,9 @@
+# ansible-lint configuration for jaxzin.infra collection
+#
+# var-naming[no-role-prefix] is suppressed because the tailscale_sidecar role
+# uses a `tailscale_` prefix (matching the technology, not the role name
+# `tailscale_sidecar_`) as a deliberate, stable public API. Renaming all
+# variables to `tailscale_sidecar_*` would be a breaking change for all
+# consumers. This is an accepted deviation from the lint rule.
+warn_list:
+  - var-naming[no-role-prefix]
