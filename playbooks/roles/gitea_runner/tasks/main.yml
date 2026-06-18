@@ -1,16 +1,18 @@
 ---
 # Deploy a Gitea Actions runner as a single socket-mounted container.
-# Host-agnostic. Runs in the CI job container via connection: local
-# (co-located with the bootstrap controller — see
-# docs/runbooks/gitea-runner-host.md), driving the HOST Docker daemon
-# through the bind-mounted socket.
+# Host-agnostic. Runs OVER SSH on GITEA_RUNNER_HOST under become: true (the
+# controller is a separate home-network machine — see
+# docs/runbooks/gitea-runner-host.md); community.docker tasks execute on the
+# TARGET, driving its Docker daemon through the bind-mounted socket. The
+# runner_host_seed role installs the Docker SDK on the target beforehand.
 #
-# The runner registration token is NOT minted here. The CI container
-# cannot reach the Gitea admin API (Gitea HTTP is loopback-only on the
-# NAS; the tailnet URL is unresolvable from a non-tailnet container). It
-# is minted in gitea-deploy.yml Play 1 on the NAS (working loopback admin
-# API) and passed in via `gitea_runner_token` (hostvars) — the same
-# cross-play pattern the admin token uses.
+# The runner registration token is NOT minted here. This role is
+# deliberately API-free — a pure consumer with no dependency on Gitea API
+# reachability, admin credentials, or TLS. Minting needs the Gitea ADMIN
+# API, which Play 1 already holds on the NAS (loopback admin API, with
+# gitea_api_token a fact from gitea_server); it mints there and passes the
+# value in via `gitea_runner_token` (hostvars) — the same cross-play
+# pattern the admin token uses.
 
 - name: Assert the runner registration token was provided by the deploy
   assert:
@@ -20,8 +22,8 @@
     fail_msg: >-
       gitea_runner_token is empty. It must be minted by gitea-deploy.yml
       Play 1 on the NAS (loopback admin API) and passed to this play via
-      hostvars. This role deliberately does NOT call the Gitea API — the
-      CI container cannot reach it. See docs/runbooks/gitea-runner-host.md.
+      hostvars. This role deliberately does NOT call the Gitea API — it is
+      an API-free pure consumer. See docs/runbooks/gitea-runner-host.md.
     success_msg: "Runner registration token supplied by the deploy."
 
 - name: Preflight — assert the Docker daemon is reachable on the target
