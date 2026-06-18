@@ -36,10 +36,10 @@ playbooks/
 │   ├── certbot/                # Let’s Encrypt certificate management
 │   ├── gitea_backup/           # Gitea backup to Backblaze B2
 │   ├── gitea_runner/           # Gitea Actions runner deployment
-│   ├── gitea_server/           # Gitea server + MySQL deployment
-│   └── tailscale_sidecar/      # Reusable Tailscale sidecar container
+│   └── gitea_server/           # Gitea server + MySQL deployment
 ├── templates/
-│   └── app.ini.j2              # Gitea configuration template
+│   ├── app.ini.j2              # Gitea configuration template
+│   └── ts-serve-gitea.json.j2  # Tailscale Serve config for the Gitea sidecar
 ├── vars/
 │   └── main.yml                # All playbook variables
 ├── gitea-deploy.yml            # Main deployment playbook
