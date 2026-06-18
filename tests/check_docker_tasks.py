@@ -31,6 +31,10 @@ import re
 import sys
 
 ROLES_DIR = "playbooks/roles"
+# tailscale_sidecar now ships from the vendored jaxzin.infra collection, not
+# the local roles/ dir (migrated 2026-06-17; jaxzin.infra#7). ROLES_DIR still
+# serves the other (local) roles + the checks A/C glob.
+COLLECTION_ROLES_DIR = "collections/ansible_collections/jaxzin/infra/roles"
 FORBIDDEN_WITH_CONTAINER_MODE = ["dns_opts", "dns:", "dns_search", "networks", "ports"]
 
 DOCKERFILE_PATH = "Dockerfile"
@@ -39,16 +43,19 @@ DOCKERFILE_PATH = "Dockerfile"
 # lock-in does not break if a maintainer switches to the canonical name.
 DIG_PACKAGES = ("dnsutils", "bind9-dnsutils")
 
-TAILSCALE_SIDECAR_TASKS = f"{ROLES_DIR}/tailscale_sidecar/tasks/main.yml"
-# Markers that must all be present in the sidecar role for the Gitea #25
-# fail-fast fix to be considered in place:
-#  - "NeedsLogin"  → the auth-expired/revoked BackendState is explicitly handled
-#  - "Self.Online" → readiness asserts a usable route, not just Running
-#  - the runbook path → the actionable error points operators at rotation
+TAILSCALE_SIDECAR_TASKS = f"{COLLECTION_ROLES_DIR}/tailscale_sidecar/tasks/main.yml"
+# Markers that must all be present in the (vendored) sidecar role for the
+# Gitea #25 fail-fast fix to be considered in place:
+#  - "NeedsLogin"    → the auth-expired/revoked BackendState is explicitly handled
+#  - "Self.Online"   → readiness asserts the node is online, not just Running
+#  - "non-ephemeral" → the actionable message tells the operator to rotate to a
+#                      reusable, non-ephemeral key (the generic collection role's
+#                      wording; the bootstrap-specific rotation runbook path lives
+#                      in the deploy playbook, not the vendored role).
 AUTHKEY_FAILFAST_MARKERS = (
     "NeedsLogin",
     "Self.Online",
-    "docs/runbooks/tailscale-authkey-rotation.md",
+    "non-ephemeral",
 )
 
 GITEA_RUNNER_TASKS = f"{ROLES_DIR}/gitea_runner/tasks/main.yml"
@@ -281,7 +288,7 @@ def check_e_runner_no_container_network_mode(errors):
 
 def check_tailscale_sidecar(errors):
     """Check B: tailscale_sidecar must have TS_ACCEPT_DNS in env."""
-    filepath = f"{ROLES_DIR}/tailscale_sidecar/tasks/main.yml"
+    filepath = f"{COLLECTION_ROLES_DIR}/tailscale_sidecar/tasks/main.yml"
     try:
         with open(filepath) as f:
             lines = f.readlines()

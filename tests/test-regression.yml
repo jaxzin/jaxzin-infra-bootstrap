@@ -13,6 +13,7 @@
     project_root: "{{ playbook_dir }}/.."
     roles_dir: "{{ project_root }}/playbooks/roles"
     templates_dir: "{{ project_root }}/playbooks/templates"
+    collection_roles_dir: "{{ project_root }}/collections/ansible_collections/jaxzin/infra/roles"
     # Test-only variables for template rendering (no real domains)
     test_tailnet: "test-tailnet.ts.net"
     test_gitea_domain: "gitea.test-tailnet.ts.net"
@@ -130,7 +131,7 @@
     # ================================================================
     - name: "CHECK 4: Render ts-serve-gitea.json.j2"
       template:
-        src: "{{ roles_dir }}/tailscale_sidecar/templates/ts-serve-gitea.json.j2"
+        src: "{{ templates_dir }}/ts-serve-gitea.json.j2"
         dest: "/tmp/test-ts-serve-rendered.json"
       vars:
         tailscale_serve_domain: "{{ test_serve_domain }}"
@@ -170,7 +171,7 @@
     # naive refactor that drops the gating or changes a port silently.
     - name: "CHECK 6: Read tailscale_sidecar tasks/main.yml"
       slurp:
-        src: "{{ roles_dir }}/tailscale_sidecar/tasks/main.yml"
+        src: "{{ collection_roles_dir }}/tailscale_sidecar/tasks/main.yml"
       register: tailscale_sidecar_tasks_raw
 
     - name: "CHECK 6: Decode tailscale_sidecar tasks/main.yml"
@@ -574,23 +575,32 @@
     # The role must: (a) always set dns_servers=['100.100.100.100']
     # unconditionally (not gated on tailscale_accept_dns) so 127.0.0.11's
     # upstream is MagicDNS, and (b) inject 127.0.0.11 back after tailscaled
-    # writes resolv.conf when tailscale_accept_dns=true. (2026-05-25 incident)
-    - name: "CHECK 14: Assert tailscale_sidecar restores 127.0.0.11 in resolv.conf"
+    # writes resolv.conf when tailscale_accept_dns=true. In the vendored
+    # collection role this downstream heal MOVED out of tasks/main.yml and
+    # now lives in files/dns-watchdog.sh (heal_resolv_conf); tasks/main.yml
+    # must still NOT gate dns_servers on tailscale_accept_dns. (2026-05-25)
+    - name: "CHECK 14: Read vendored dns-watchdog.sh"
+      slurp:
+        src: "{{ collection_roles_dir }}/tailscale_sidecar/files/dns-watchdog.sh"
+      register: dns_watchdog_raw
+
+    - name: "CHECK 14: Decode dns-watchdog.sh"
+      set_fact:
+        dns_watchdog_sh: "{{ dns_watchdog_raw.content | b64decode }}"
+
+    - name: "CHECK 14: Assert downstream 127.0.0.11 heal present + dns_servers not gated on accept_dns"
       assert:
         that:
-          - "'nameserver 127.0.0.11' in tailscale_sidecar_tasks"
-          - "'Restore Docker embedded DNS resolver' in tailscale_sidecar_tasks"
-          # The OLD dns_servers was a Jinja2 inline-if gated on tailscale_accept_dns;
-          # the new form is an unconditional literal list. Absence of the old
-          # inline-if fragment proves the conditional form was removed.
+          - "'127.0.0.11' in dns_watchdog_sh"
+          - "'heal_resolv_conf' in dns_watchdog_sh"
           - "'if not (tailscale_accept_dns' not in tailscale_sidecar_tasks"
         fail_msg: >
-          tailscale_sidecar/tasks/main.yml must: (1) set dns_servers unconditionally
-          to the literal list (no inline-if on tailscale_accept_dns — old conditional
-          form is banned), and (2) have a task named 'Restore Docker embedded DNS
-          resolver' that injects 'nameserver 127.0.0.11' back after tailscaled writes
-          resolv.conf. Without this, deploy fails with "nc: bad address 'gitea-db'"
-          (2026-05-25 incident).
+          The vendored tailscale_sidecar must keep the downstream resolv.conf
+          heal (re-prepend nameserver 127.0.0.11 via heal_resolv_conf in
+          files/dns-watchdog.sh) and must NOT gate dns_servers on
+          tailscale_accept_dns (old banned inline-if form). Without the
+          downstream heal, containers sharing the netns lose Docker-name
+          resolution (gitea-db) on the next tailscaled restart (2026-06-05).
 
     # ================================================================
     # Check 15: Tailscale sidecar self-heals resolv.conf continuously,
@@ -603,24 +613,45 @@
     # the bug; gitea then failed DB resolution with "lookup gitea-db ...
     # no such host"). The durable fix is a Docker healthcheck on the sidecar
     # that re-asserts 127.0.0.11 on a fixed interval forever and reports
-    # healthy iff it's present — a reconcile loop, not a one-shot. This check
-    # locks in that the healthcheck exists AND carries the reconcile write
-    # (presence of 'healthcheck:' alone is insufficient — it must repair).
-    - name: "CHECK 15: Assert tailscale_sidecar healthcheck self-heals resolv.conf"
+    # healthy iff it's present — a reconcile loop, not a one-shot. In the
+    # vendored collection role the healthcheck RUNS dns-watchdog.sh, and the
+    # in-place open+truncate write (staged TMPDIR/dns-watchdog.resolv, then
+    # `> $RESOLV_CONF`) lives in that script — so this check locks both: the
+    # healthcheck wires dns-watchdog.sh AND the script does the staged write.
+    - name: "CHECK 15: Assert continuous self-heal — healthcheck runs dns-watchdog + script does open+truncate write"
       assert:
         that:
           - "'healthcheck:' in tailscale_sidecar_tasks"
-          # The healthcheck must carry the in-place reconcile write, proving it
-          # repairs rather than merely probing. The redirect to /tmp/resolv_new
-          # is the signature of the open+truncate (non-rename) write pattern.
-          - "'/tmp/resolv_new' in tailscale_sidecar_tasks"
+          - "'dns-watchdog.sh' in tailscale_sidecar_tasks"
+          - "'dns-watchdog.resolv' in dns_watchdog_sh"
         fail_msg: >
-          tailscale_sidecar/tasks/main.yml must have a Docker healthcheck on the
-          sidecar that continuously reconciles resolv.conf (re-prepends
-          'nameserver 127.0.0.11' via the /tmp/resolv_new open+truncate write,
-          never 'sed -i'). Without a continuous reconciler the deploy-time fix is
-          stripped on the next tailscaled restart and gitea loses gitea-db
-          resolution (2026-06-05 incident).
+          The vendored tailscale_sidecar must run dns-watchdog.sh as the
+          container healthcheck (continuous reconcile, not a one-shot) and the
+          script must re-prepend 127.0.0.11 via a staged open+truncate write
+          (TMPDIR/dns-watchdog.resolv then `> $RESOLV_CONF`, never sed -i —
+          rename() is EBUSY on the bind mount). Without a continuous reconciler
+          the deploy-time fix is stripped on the next tailscaled restart.
+
+    # ================================================================
+    # Check 16: the vendored tailscale_sidecar keeps the jaxzin.infra#7
+    #           UPSTREAM DNS watchdog — probe MagicDNS for an external
+    #           name and, on SERVFAIL, bounce accept-dns to force
+    #           tailscaled to re-apply upstream resolvers. Without it a
+    #           sidecar restart re-breaks Gitea OIDC login (500).
+    # ================================================================
+    - name: "CHECK 16: Assert the jaxzin.infra#7 upstream DNS watchdog (probe + accept-dns bounce) is present"
+      assert:
+        that:
+          - "'accept-dns=false' in dns_watchdog_sh"
+          - "'bounce_accept_dns' in dns_watchdog_sh"
+          - "'probe_upstream' in dns_watchdog_sh"
+        fail_msg: >
+          The vendored tailscale_sidecar lost the jaxzin.infra#7 upstream DNS
+          watchdog: dns-watchdog.sh must probe MagicDNS (probe_upstream) and, on
+          SERVFAIL, bounce accept-dns false->true (bounce_accept_dns) to force
+          tailscaled to re-apply upstream resolvers. Without it a sidecar/host
+          restart re-breaks Gitea OIDC discovery (500). (jaxzin.infra#7)
+        success_msg: "jaxzin.infra#7 upstream DNS watchdog present in vendored role."
 
     # ================================================================
     # Cleanup
