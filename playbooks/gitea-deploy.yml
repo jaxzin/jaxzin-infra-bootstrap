@@ -72,7 +72,8 @@
 
     - name: Deploy Tailscale sidecar for Gitea
       include_role:
-        name: tailscale_sidecar
+        name: jaxzin.infra.tailscale_sidecar
+      when: tailscale_enabled | default(false) | bool
       vars:
         tailscale_container_name: "{{ tailscale_gitea_container_name }}"
         tailscale_hostname: "{{ tailscale_gitea_hostname }}"
@@ -102,9 +103,26 @@
           # tailnet-side ssh://git@gitea.<tailnet>:22/... flow). LAN traffic
           # arriving on :22 finds no matching listener and gets RST. Gitea
           # itself listens on :::2222 (app.ini SSH_LISTEN_PORT). Same variable
-          # as line 76's tailscale_serve_ssh_forward_port keeps both paths
+          # as the tailscale_serve_ssh_forward_port above keeps both paths
           # consistent.
           - "{{ gitea_lan_host }}:{{ gitea_lan_ssh_port }}:{{ gitea_ssh_listen_port }}"
+        # Gitea makes OUTBOUND tailnet calls (authentik OIDC discovery) through
+        # this sidecar's netns, so a peer-less sidecar => ENETUNREACH. Preserve
+        # the old local role's unconditional route assertion.
+        tailscale_assert_tailnet_route: true
+        # jaxzin.infra#7 DNS watchdog. Collection defaults already match the old
+        # hardcoded wiring (dns_servers=[100.100.100.100], watchdog enabled,
+        # probe one.one.one.one @ 100.100.100.100). Pin the script host-dir
+        # under the gitea tailscale tree for tidiness.
+        tailscale_dns_watchdog_host_dir: "{{ tailscale_gitea_state_dir | dirname }}/gitea-dns-watchdog"
+        # Preserve today's UNCAPPED sidecar (measured live: mem=0 swap=0). The
+        # collection defaults (memory_limit=96m, memory_swap=192m) would newly
+        # OOM-cap tailscaled — and an OOM-kill re-breaks DNS, the exact failure
+        # this migration exists to fix. Set BOTH to "0": memory="0" is Docker's
+        # "unlimited", and unlimited memory MUST pair with memory_swap="0" (a
+        # finite swap alongside unlimited memory is invalid).
+        tailscale_memory_limit: "0"
+        tailscale_memory_swap: "0"
 
     - name: Include gitea_server role
       include_role:
