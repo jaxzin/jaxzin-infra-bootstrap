@@ -145,7 +145,7 @@
     # ================================================================
     - name: "CHECK 4: Render ts-serve-gitea.json.j2"
       template:
-        src: "{{ roles_dir }}/tailscale_sidecar/templates/ts-serve-gitea.json.j2"
+        src: "{{ templates_dir }}/ts-serve-gitea.json.j2"
         dest: "/tmp/test-ts-serve-rendered.json"
       vars:
         tailscale_serve_domain: "{{ test_serve_domain }}"
