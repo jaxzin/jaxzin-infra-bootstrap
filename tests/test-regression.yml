@@ -288,11 +288,18 @@
           - "'ansible_ssh_private_key_file' in common_bootstrap"
           - "'ansible_connection=local' not in common_bootstrap"
           - "'connection: local' not in gitea_deploy"
+          # Play 2 (gitea_runner) runs become:true; the runner-host inventory
+          # MUST supply a become password so non-interactive sudo works (the
+          # runner SSH user is key-auth'd but not necessarily passwordless-sudo).
+          # Without it the deploy fails with "Missing sudo password".
+          - "'GITEA_RUNNER_SUDO_PASSWORD' in common_bootstrap"
         fail_msg: >
           The opportunistic SSH wiring regressed: common-bootstrap.yml must
           install GITEA_RUNNER_SSH_KEY and set ansible_ssh_private_key_file
-          for [gitea_runner] (NOT ansible_connection=local), and
-          gitea-deploy.yml Play 2 must NOT be connection: local.
+          for [gitea_runner] (NOT ansible_connection=local), set
+          ansible_become_password from GITEA_RUNNER_SUDO_PASSWORD (Play 2 runs
+          become:true on a non-passwordless-sudo host), and gitea-deploy.yml
+          Play 2 must NOT be connection: local.
 
     - name: "CHECK 8: Assert the host is seeded before the runner is deployed"
       assert:

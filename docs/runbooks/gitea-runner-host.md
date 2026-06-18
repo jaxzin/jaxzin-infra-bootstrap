@@ -14,7 +14,10 @@ runner target are **different machines**, connected over SSH.
 ## Target-host contract (the only things assumed)
 
 1. Reachable over **SSH** from the controller, with a sudo-capable user
-   (`GITEA_RUNNER_SSH_USER`) and the `GITEA_RUNNER_SSH_KEY` authorized.
+   (`GITEA_RUNNER_SSH_USER`) and the `GITEA_RUNNER_SSH_KEY` authorized. Play 2
+   runs `become: true` non-interactively, so that user needs either passwordless
+   sudo (NOPASSWD) or its sudo password supplied via the
+   `GITEA_RUNNER_SUDO_PASSWORD` secret.
 2. Reachable **before** it is on the tailnet (the seed joins the tailnet),
    so `GITEA_RUNNER_HOST` must be LAN-resolvable at seed time.
 3. A systemd Linux host where Docker can be installed.
@@ -72,6 +75,7 @@ install the key over the key it installs).
 | `GITEA_RUNNER_HOST` | Secret | The target host (LAN-resolvable for pre-tailnet seeding). |
 | `GITEA_RUNNER_SSH_USER` | Variable | Sudo-capable SSH user on the target. |
 | `GITEA_RUNNER_SSH_KEY` | Secret | Private key authorized on the target. |
+| `GITEA_RUNNER_SUDO_PASSWORD` | Secret | `sudo`/become password for `GITEA_RUNNER_SSH_USER`. Play 2 runs `become: true` non-interactively (`runner_host_seed` installs Docker + joins the tailnet as root), so the password is required unless that user has passwordless sudo (NOPASSWD) — in which case the secret may be left unset. |
 | `TS_AUTHKEY` | Secret | Reused to join the target to the tailnet. |
 | `GITEA_RUNNER_IMAGE` / `_NAME` / `_DATA_PATH` | Variable | Optional overrides (see role defaults). |
 
