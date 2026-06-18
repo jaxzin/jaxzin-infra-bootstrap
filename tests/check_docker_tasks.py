@@ -19,6 +19,11 @@ Checks:
   J) runner image Dockerfile must pip-install the Docker SDK (`docker`):
      gitea-deploy.yml Play 2 runs community.docker locally in this image
      (connection: local, co-located with the Gitea runner)
+  K) seed-runner-ssh.yml must grant the runner deploy account PASSWORDLESS
+     sudo: gitea-deploy.yml Play 2 runs `become: true` over SSH with key auth
+     and no become password, so a missing NOPASSWD grant makes Play 2 die on
+     its first escalation with "Missing sudo password" (regression lock-in —
+     see docs/runbooks/gitea-runner-host.md).
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -54,6 +59,20 @@ GITEA_RUNNER_FORBIDDEN_MARKERS = (
     "synology_dsm",             # DSM-only runner label
     "DOCKER_INSECURE_NO_IPTABLES_RAW",  # DSM dind workaround
 )
+
+RUNNER_SSH_SEED_PLAYBOOK = "playbooks/seed-runner-ssh.yml"
+# gitea-deploy.yml Play 2 runs `become: true` over SSH with key auth and NO
+# become password, so seed-runner-ssh.yml MUST grant the deploy account
+# passwordless sudo — otherwise Play 2 dies on its first escalation (incl. the
+# implicit gather_facts setup) with "Missing sudo password". The markers are
+# matched against NON-comment lines only (so the explanatory comments can't
+# satisfy the check on their own):
+#  - "sudoers"  → an actual sudoers grant is installed (the /etc/sudoers.d
+#                 drop-in path, or a community.general.sudoers module switch)
+#  - passwordless directive → "NOPASSWD" (drop-in literal) or "nopassword"
+#                 (the module param), so the grant is genuinely password-free
+RUNNER_SSH_SEED_SUDOERS_MARKER = "sudoers"
+RUNNER_SSH_SEED_NOPASSWD_MARKERS = ("NOPASSWD", "nopassword")
 
 GITEA_HOST_PORTS_REQUIRED = [
     re.compile(r'^["\']?127\.0\.0\.1:.*:3000["\']?$'),
@@ -386,6 +405,50 @@ def check_h_gitea_runner_socket_mount(errors):
                 )
 
 
+def check_k_runner_seed_passwordless_sudo(errors):
+    """Check K: seed-runner-ssh.yml must grant the runner deploy account
+    passwordless sudo (a NOPASSWD sudoers drop-in).
+
+    gitea-deploy.yml Play 2 (`hosts: gitea_runner`, `become: true`) connects
+    over SSH with key auth and supplies NO ansible_become_password. Without a
+    passwordless-sudo grant on the target, the very first escalation — the
+    implicit gather_facts setup — fails with "Missing sudo password" and the
+    whole runner deploy never starts (ok=0 failed=1). The one-time seed is the
+    IaC that establishes the grant; lock it in so a refactor can't silently
+    drop it and reintroduce the break. See docs/runbooks/gitea-runner-host.md.
+
+    Markers are matched against NON-comment lines only, so the explanatory
+    comments in the playbook cannot satisfy the check on their own.
+    """
+    try:
+        with open(RUNNER_SSH_SEED_PLAYBOOK) as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        errors.append(
+            f"{RUNNER_SSH_SEED_PLAYBOOK}: File not found; this seed is what "
+            f"grants the runner account passwordless sudo for gitea-deploy.yml "
+            f"Play 2. See docs/runbooks/gitea-runner-host.md."
+        )
+        return
+
+    code = "\n".join(ln for ln in lines if not ln.lstrip().startswith("#"))
+
+    if RUNNER_SSH_SEED_SUDOERS_MARKER not in code:
+        errors.append(
+            f"{RUNNER_SSH_SEED_PLAYBOOK}: no sudoers grant found; the seed must "
+            f"install a passwordless-sudo drop-in for the runner deploy account "
+            f"or gitea-deploy.yml Play 2 fails with 'Missing sudo password'. "
+            f"See docs/runbooks/gitea-runner-host.md."
+        )
+    elif not any(m in code for m in RUNNER_SSH_SEED_NOPASSWD_MARKERS):
+        errors.append(
+            f"{RUNNER_SSH_SEED_PLAYBOOK}: sudoers grant present but not "
+            f"passwordless (expected one of {RUNNER_SSH_SEED_NOPASSWD_MARKERS}); "
+            f"Play 2 supplies no become password, so the grant must be NOPASSWD. "
+            f"See docs/runbooks/gitea-runner-host.md."
+        )
+
+
 def main():
     errors = []
     warnings = []
@@ -416,6 +479,10 @@ def main():
     # Run check J: runner image must pip-install the Docker SDK (Play 2
     # runs community.docker locally in this image)
     check_j_dockerfile_docker_sdk(errors)
+
+    # Run check K: the runner SSH seed must grant passwordless sudo so Play 2's
+    # `become: true` deploy doesn't fail with "Missing sudo password"
+    check_k_runner_seed_passwordless_sudo(errors)
 
     # Report results
     for w in warnings:

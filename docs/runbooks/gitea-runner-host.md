@@ -14,7 +14,11 @@ runner target are **different machines**, connected over SSH.
 ## Target-host contract (the only things assumed)
 
 1. Reachable over **SSH** from the controller, with a sudo-capable user
-   (`GITEA_RUNNER_SSH_USER`) and the `GITEA_RUNNER_SSH_KEY` authorized.
+   (`GITEA_RUNNER_SSH_USER`) and the `GITEA_RUNNER_SSH_KEY` authorized. Play 2
+   runs `become: true` with key auth and **no** become password, so that user
+   needs **passwordless sudo** — the one-time seed below installs it (a
+   `/etc/sudoers.d/gitea-runner` NOPASSWD drop-in). Without it Play 2 fails on
+   its first escalation with `Missing sudo password`.
 2. Reachable **before** it is on the tailnet (the seed joins the tailnet),
    so `GITEA_RUNNER_HOST` must be LAN-resolvable at seed time.
 3. A systemd Linux host where Docker can be installed.
@@ -51,15 +55,21 @@ Set `runner_host_seed_accept_dns: true` only on a **dedicated** runner host
 whose tailnet split-DNS already covers its LAN domains (then the pin is
 unnecessary, though harmless).
 
-## SSH access (one-time seed, IaC)
+## SSH access + passwordless sudo (one-time seed, IaC)
 
 The runner deploy logs in as a sudo-capable account (`GITEA_RUNNER_SSH_USER`).
-Authorize a dedicated runner keypair once (and on DR):
+The seed authorizes a dedicated runner keypair **and** grants that account
+passwordless sudo (the NOPASSWD drop-in Play 2 needs). Run once (and on DR):
 
     ssh-keygen -t ed25519 -f gitea-runner -C gitea-runner -N ''
     # gitea-runner.pub  -> commit to playbooks/files/gitea-runner.pub
     # gitea-runner (private) -> paste into the GITEA_RUNNER_SSH_KEY CI secret
-    ansible-playbook seed-runner-ssh.yml -i 'GITEA_RUNNER_HOST,' -u <GITEA_RUNNER_SSH_USER>
+    ansible-playbook seed-runner-ssh.yml -i 'GITEA_RUNNER_HOST,' -u <GITEA_RUNNER_SSH_USER> -K
+
+On the **first** run pass `-K` (`--ask-become-pass`): passwordless sudo isn't
+in place yet, so the sudoers task needs the account's sudo password once. The
+drop-in is written with `visudo` validation, so a malformed entry can never
+land and lock sudo out. Later runs are true no-ops and need no `-K`.
 
 `seed-runner-ssh.yml` is idempotent — re-run any time / on DR. Install it
 using whatever existing SSH access you already have to the host (you cannot
@@ -70,7 +80,7 @@ install the key over the key it installs).
 | Name | Kind | Purpose |
 |---|---|---|
 | `GITEA_RUNNER_HOST` | Secret | The target host (LAN-resolvable for pre-tailnet seeding). |
-| `GITEA_RUNNER_SSH_USER` | Variable | Sudo-capable SSH user on the target. |
+| `GITEA_RUNNER_SSH_USER` | Variable | Sudo-capable SSH user on the target (the seed grants it passwordless sudo). |
 | `GITEA_RUNNER_SSH_KEY` | Secret | Private key authorized on the target. |
 | `TS_AUTHKEY` | Secret | Reused to join the target to the tailnet. |
 | `GITEA_RUNNER_IMAGE` / `_NAME` / `_DATA_PATH` | Variable | Optional overrides (see role defaults). |
@@ -104,3 +114,10 @@ The act_runner is **socket-mounted**: every CI job container has
 root-equivalent authority over the target's Docker daemon (the deliberate
 price of deleting dind). When the runner shares a host with another service,
 treat the box as single-tenant-trusted; keep runner `capacity: 1`.
+
+The deploy account also has **passwordless sudo** (`NOPASSWD: ALL`, seeded
+above). Accept knowingly: on a socket-mounted host the runner already holds
+root-equivalent authority via the Docker socket, so NOPASSWD grants nothing it
+couldn't already obtain — it just lets the unattended SSH deploy escalate
+without a stored sudo password. The grant is scoped to the dedicated deploy
+account, which is reachable only with the `GITEA_RUNNER_SSH_KEY` private key.

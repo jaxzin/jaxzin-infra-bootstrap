@@ -1,9 +1,14 @@
 ---
 # Idempotent SSH-access seed for the Gitea runner host.
 #
-# Authorizes the DEDICATED runner public key (playbooks/files/gitea-runner.pub)
-# for the deploy account on the target, so the bootstrap CI can SSH in as
-# GITEA_RUNNER_SSH_USER with the GITEA_RUNNER_SSH_KEY private key.
+# Establishes the TWO things gitea-deploy.yml Play 2 needs on the target:
+#   1. The DEDICATED runner public key (playbooks/files/gitea-runner.pub) is
+#      authorized for the deploy account, so the bootstrap CI can SSH in as
+#      GITEA_RUNNER_SSH_USER with the GITEA_RUNNER_SSH_KEY private key.
+#   2. That account has PASSWORDLESS sudo (a /etc/sudoers.d/gitea-runner
+#      NOPASSWD drop-in). Play 2 runs `become: true` over SSH with key auth
+#      and NO become password — without this it dies on its first escalation
+#      (incl. the implicit gather_facts setup) with "Missing sudo password".
 #
 # The authorized account MUST match GITEA_RUNNER_SSH_USER. By default this
 # playbook reads that same env var (falling back to `pi`) so the seeded
@@ -12,8 +17,11 @@
 #
 # Run ONCE by the operator (and on DR) from a machine that already has SSH
 # access to the host — you cannot install the key over the key it installs.
+# On the FIRST run, passwordless sudo isn't in place yet, so pass -K (you
+# will be prompted once for the account's sudo password); later runs are
+# true no-ops and need no -K.
 #   GITEA_RUNNER_SSH_USER=pi ansible-playbook seed-runner-ssh.yml \
-#     -i 'GITEA_RUNNER_HOST,' -u "$GITEA_RUNNER_SSH_USER"
+#     -i 'GITEA_RUNNER_HOST,' -u "$GITEA_RUNNER_SSH_USER" -K
 #
 # The private key lives ONLY in the GITEA_RUNNER_SSH_KEY CI secret. The
 # public key is safe to commit. See docs/runbooks/gitea-runner-host.md.
@@ -24,7 +32,30 @@
     runner_ssh_login_user: "{{ lookup('ansible.builtin.env', 'GITEA_RUNNER_SSH_USER') | default('pi', true) }}"
   tasks:
     - name: Authorize the dedicated runner public key
+      # Writes to the deploy account's own ~/.ssh — no root needed, so this
+      # task deliberately runs WITHOUT become and still works on a host where
+      # sudo isn't usable yet (this seed is what makes sudo usable).
       ansible.posix.authorized_key:
         user: "{{ runner_ssh_login_user }}"
         state: present
         key: "{{ lookup('ansible.builtin.file', 'files/gitea-runner.pub') }}"
+
+    - name: Grant the runner deploy account passwordless sudo (NOPASSWD drop-in)
+      # NOPASSWD: ALL — Play 2 runs the whole play under `become: true` and its
+      # seed tasks legitimately need arbitrary root (get.docker.com | sh,
+      # systemctl, package/pip installs, tailscale up), so scoping to specific
+      # commands would be fiction. The box is already single-tenant-trusted and
+      # socket-mounted (root-equivalent Docker), so this adds ~no blast radius —
+      # see the security trade-off in docs/runbooks/gitea-runner-host.md.
+      #
+      # `validate: visudo -cf` syntax-checks the drop-in on a TEMP file before
+      # it is moved into place, so a malformed entry can never lock sudo out.
+      # ansible.builtin only — no extra Galaxy collection to install on DR.
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/gitea-runner
+        content: "{{ runner_ssh_login_user }} ALL=(ALL) NOPASSWD: ALL\n"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+      become: true
