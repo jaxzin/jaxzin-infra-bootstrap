@@ -1,0 +1,209 @@
+---
+- name: Create Tailscale state directory
+  ansible.builtin.file:
+    path: "{{ tailscale_state_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Create DNS watchdog script directory on the host
+  ansible.builtin.file:
+    path: "{{ tailscale_dns_watchdog_host_dir }}"
+    state: directory
+    mode: "0755"
+  when: tailscale_dns_watchdog_enabled
+
+- name: Install the DNS watchdog script on the host
+  ansible.builtin.copy:
+    src: dns-watchdog.sh
+    dest: "{{ tailscale_dns_watchdog_host_dir }}/dns-watchdog.sh"
+    mode: "0755"
+  when: tailscale_dns_watchdog_enabled
+
+- name: Create Tailscale Serve config directory
+  ansible.builtin.file:
+    path: "{{ tailscale_serve_config_dir }}"
+    state: directory
+    mode: "0755"
+  when: tailscale_serve_enabled
+
+- name: Render Tailscale Serve config
+  ansible.builtin.template:
+    src: "{{ tailscale_serve_config_src }}"
+    dest: "{{ tailscale_serve_config_dir }}/serve.json"
+    mode: "0644"
+  when: tailscale_serve_enabled
+
+- name: Deploy Tailscale sidecar container
+  community.docker.docker_container:
+    name: "{{ tailscale_container_name }}"
+    image: "{{ tailscale_image }}"
+    state: started
+    restart_policy: always
+    dns_servers: "{{ tailscale_dns_servers if (tailscale_dns_servers | length > 0) else omit }}"
+    healthcheck: >-
+      {{
+        {
+          'test': ['CMD', '/bin/sh', '/usr/local/bin/dns-watchdog.sh'],
+          'interval': tailscale_dns_watchdog_interval,
+          'timeout': tailscale_dns_watchdog_timeout,
+          'retries': tailscale_dns_watchdog_retries,
+          'start_period': tailscale_dns_watchdog_start_period,
+        }
+        if tailscale_dns_watchdog_enabled else omit
+      }}
+    log_driver: "{{ tailscale_log_driver }}"
+    log_options: "{{ tailscale_log_options }}"
+    networks:
+      - name: "{{ tailscale_network_name }}"
+    ports: "{{ tailscale_host_ports }}"
+    memory: "{{ tailscale_memory_limit }}"
+    memory_swap: "{{ tailscale_memory_swap }}"
+    # Kernel-mode Tailscale needs CAP_NET_ADMIN + CAP_SYS_MODULE and the
+    # /dev/net/tun device (mounted below) to bring up its kernel TUN interface.
+    # Userspace mode (TS_USERSPACE=true) routes WireGuard entirely in user
+    # space, so neither is needed — granting them anyway over-privileges the
+    # container. Conditional: kernel mode only (else omit drops the key).
+    capabilities: >-
+      {{
+        ['NET_ADMIN', 'SYS_MODULE']
+        if not (tailscale_userspace_networking | bool) else omit
+      }}
+    # TS_DNS_ACCEPT_DNS mirrors TS_ACCEPT_DNS (image entrypoint) on purpose — the watchdog script reads its own key; do not dedupe.
+    env: >-
+      {{
+        {
+          'TS_HOSTNAME': tailscale_hostname,
+          'TS_AUTHKEY': tailscale_authkey,
+          'TS_STATE_DIR': '/var/lib/tailscale',
+          'TS_USERSPACE': tailscale_userspace_networking | bool | string | lower,
+          'TS_ACCEPT_DNS': tailscale_accept_dns | string | lower,
+        }
+        | combine(
+            {'TS_SERVE_CONFIG': '/etc/tailscale/serve.json'}
+            if tailscale_serve_enabled else {}
+          )
+        | combine(
+            {'TS_EXTRA_ARGS': tailscale_extra_args}
+            if tailscale_extra_args else {}
+          )
+        | combine(
+            {
+              'TS_DNS_ACCEPT_DNS': tailscale_accept_dns | string | lower,
+              'TS_DNS_PROBE_NAME': tailscale_dns_probe_name,
+              'TS_DNS_PROBE_RESOLVER': tailscale_dns_probe_resolver,
+            }
+            if tailscale_dns_watchdog_enabled else {}
+          )
+        | combine(
+            {
+              'TS_SOCKS5_SERVER': ':1055',
+              'TS_OUTBOUND_HTTP_PROXY_LISTEN': ':1099',
+            }
+            if tailscale_userspace_networking | bool else {}
+          )
+      }}
+    # /dev/net/tun is bind-mounted only in kernel mode (see capabilities above);
+    # userspace mode never opens the device.
+    volumes: >-
+      {{
+        [tailscale_state_dir ~ ':/var/lib/tailscale']
+        + (
+            ['/dev/net/tun:/dev/net/tun']
+            if not (tailscale_userspace_networking | bool) else []
+          )
+        + (
+            [tailscale_serve_config_dir ~ ':/etc/tailscale:ro']
+            if tailscale_serve_enabled else []
+          )
+        + (
+            [tailscale_dns_watchdog_host_dir ~ '/dns-watchdog.sh:/usr/local/bin/dns-watchdog.sh:ro']
+            if tailscale_dns_watchdog_enabled else []
+          )
+      }}
+
+- name: Wait for Tailscale to connect to tailnet
+  community.docker.docker_container_exec:
+    container: "{{ tailscale_container_name }}"
+    command: tailscale status --json
+  register: ts_status
+  # rc guard: a failed exec or empty stdout must not crash from_json. Jinja
+  # `and` short-circuits, so BackendState is only parsed once rc == 0.
+  until: >-
+    ts_status.rc is defined and ts_status.rc == 0 and
+    (ts_status.stdout | from_json).BackendState == "Running"
+  retries: 30
+  delay: 2
+  changed_when: false
+  # Do NOT hard-fail on retry exhaustion: the tasks below turn a dead/expired
+  # TS_AUTHKEY or a "registered but not routing" sidecar into a named,
+  # actionable error instead of an opaque "until" timeout.
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Parse final Tailscale status
+  ansible.builtin.set_fact:
+    ts_state: >-
+      {{ (ts_status.stdout | from_json)
+         if (ts_status.stdout is defined and (ts_status.stdout | length) > 0)
+         else {} }}
+  when: not ansible_check_mode
+
+- name: Fail fast when the Tailscale auth key is expired or revoked
+  ansible.builtin.fail:
+    msg: >-
+      Tailscale sidecar '{{ tailscale_container_name }}' did not authenticate
+      (BackendState={{ ts_state.BackendState | default('unknown') }}). This is
+      the classic signature of an expired or revoked TS_AUTHKEY. Rotate the auth
+      key in the Tailscale admin console and update it wherever this role's
+      tailscale_authkey is sourced. Persistent sidecars require a reusable,
+      non-ephemeral auth key.
+  when:
+    - not ansible_check_mode
+    - ts_state.BackendState | default('') in ['NeedsLogin', 'NoState', 'NeedsMachineAuth']
+
+- name: Assert the Tailscale sidecar authenticated and is online
+  ansible.builtin.assert:
+    that:
+      - ts_state.BackendState | default('') == 'Running'
+      - ts_state.Self.Online | default(false) | bool
+    fail_msg: >-
+      Tailscale sidecar '{{ tailscale_container_name }}' is
+      BackendState={{ ts_state.BackendState | default('unknown') }},
+      Self.Online={{ ts_state.Self.Online | default('?') }} — it did not come up
+      cleanly. If BackendState is not Running, the TS_AUTHKEY is most likely
+      expired or revoked; rotate it (reusable, non-ephemeral).
+    success_msg: >-
+      Tailscale sidecar '{{ tailscale_container_name }}' is Running and online.
+  when: not ansible_check_mode
+
+- name: Assert the Tailscale sidecar has a usable tailnet route
+  ansible.builtin.assert:
+    that:
+      - (ts_state.Peer | default({}) | length) > 0
+    fail_msg: >-
+      Tailscale sidecar '{{ tailscale_container_name }}' is Running but has zero
+      tailnet peers — registered but NOT routing. Workloads proxying outbound
+      through this sidecar would fail with ENETUNREACH. Enable this check only
+      for outbound/proxy sidecars; leave tailscale_assert_tailnet_route=false
+      for inbound/Serve-only sidecars, where a peer-less tailnet is valid.
+    success_msg: >-
+      Tailscale sidecar '{{ tailscale_container_name }}' has
+      {{ ts_state.Peer | default({}) | length }} tailnet peer(s).
+  when:
+    - not ansible_check_mode
+    - tailscale_assert_tailnet_route | bool
+
+- name: Reconcile sidecar DNS immediately after (re)deploy
+  # Runs the watchdog once at deploy time so DNS converges immediately instead
+  # of waiting up to one healthcheck start_period. Non-blocking: failures are
+  # ignored here (failed_when: false) because the healthcheck keeps
+  # reconciling on its interval — a transient miss must not fail the play that
+  # fronts tier-1 services.
+  community.docker.docker_container_exec:
+    container: "{{ tailscale_container_name }}"
+    command: /bin/sh /usr/local/bin/dns-watchdog.sh
+  changed_when: false
+  failed_when: false
+  when:
+    - tailscale_dns_watchdog_enabled
+    - not ansible_check_mode

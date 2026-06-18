@@ -89,6 +89,13 @@
         # Keep the collection's DNS-watchdog scratch dir inside the Gitea
         # docker tree (issue #128 migration note).
         tailscale_dns_watchdog_host_dir: "{{ tailscale_gitea_dns_watchdog_dir }}"
+        # Preserve today's UNCAPPED sidecar (measured live: mem=0 swap=0). The
+        # collection defaults (memory_limit=96m, memory_swap=192m) would newly
+        # OOM-cap tailscaled — an OOM-kill re-breaks DNS, the exact failure this
+        # migration exists to fix. Set BOTH to "0": memory="0" is Docker
+        # "unlimited", which must pair with memory_swap="0".
+        tailscale_memory_limit: "0"
+        tailscale_memory_swap: "0"
         # This sidecar proxies outbound, so preserve the "registered but NOT
         # routing -> ENETUNREACH" guard. The collection defaults this false
         # for Serve-only sidecars (issue #128 migration note).

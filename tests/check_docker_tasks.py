@@ -3,6 +3,8 @@
 
 Checks:
   A) network_mode: container:* tasks must not have dns_opts/dns/networks/ports
+  B) the vendored tailscale_sidecar docker_container task must wire
+     TS_ACCEPT_DNS in env (else MagicDNS is disabled in the sidecar)
   C) standalone container tasks should have networks defined (warning)
   D) Gitea Tailscale sidecar tailscale_host_ports must include loopback HTTP
      AND LAN SSH bindings
@@ -27,6 +29,10 @@ import re
 import sys
 
 ROLES_DIR = "playbooks/roles"
+# tailscale_sidecar ships from the vendored jaxzin.infra collection, vendored
+# playbook-adjacent so the dawidd6 deploy + offline tests both resolve the FQCN.
+COLLECTION_ROLES_DIR = "playbooks/collections/ansible_collections/jaxzin/infra/roles"
+TAILSCALE_SIDECAR_TASKS = f"{COLLECTION_ROLES_DIR}/tailscale_sidecar/tasks/main.yml"
 FORBIDDEN_WITH_CONTAINER_MODE = ["dns_opts", "dns:", "dns_search", "networks", "ports"]
 
 DOCKERFILE_PATH = "Dockerfile"
@@ -132,9 +138,14 @@ def has_key_in_block(block, key):
 
 
 def has_env_var(block, var_name):
-    """Check if a specific env var key appears in the task's env: block."""
-    text = "\n".join(block)
-    return var_name in text
+    """Check if a specific env var KEY is wired in the task's env: mapping.
+
+    Matches the key form (YAML ``KEY:`` or Jinja-dict ``'KEY':``) and IGNORES
+    comment lines, so a comment merely mentioning the var name cannot make the
+    check pass vacuously.
+    """
+    text = "\n".join(line for line in block if not line.lstrip().startswith("#"))
+    return re.search(rf"{re.escape(var_name)}['\"]?\s*:", text) is not None
 
 
 def check_file(filepath, errors, warnings):
@@ -227,6 +238,30 @@ RUNNER_FORBIDDEN_NETWORK_MODE_REASON = (
     "container's namespace is a fingerprint of the retired NAS Tailscale-sidecar "
     "architecture. See docs/runbooks/gitea-runner-host.md."
 )
+
+
+def check_b_tailscale_accept_dns(errors):
+    """Check B: the vendored tailscale_sidecar docker_container task must wire
+    TS_ACCEPT_DNS in env (else MagicDNS is disabled in the sidecar)."""
+    try:
+        with open(TAILSCALE_SIDECAR_TASKS) as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        errors.append(f"{TAILSCALE_SIDECAR_TASKS}: File not found")
+        return
+    blocks = split_into_task_blocks(lines)
+    found = False
+    for block in blocks:
+        if not is_docker_container_task(block):
+            continue
+        found = True
+        if not has_env_var(block, "TS_ACCEPT_DNS"):
+            errors.append(
+                f"{TAILSCALE_SIDECAR_TASKS}: Tailscale sidecar docker_container "
+                f"task is missing TS_ACCEPT_DNS in env (MagicDNS would be disabled)"
+            )
+    if not found:
+        errors.append(f"{TAILSCALE_SIDECAR_TASKS}: no docker_container task found")
 
 
 def check_e_runner_no_container_network_mode(errors):
@@ -402,6 +437,9 @@ def main():
 
     # Run check D on the Gitea deploy playbook
     errors.extend(check_d_gitea_sidecar_host_ports())
+
+    # Run check B: the vendored tailscale_sidecar must wire TS_ACCEPT_DNS
+    check_b_tailscale_accept_dns(errors)
 
     # Run check E: gitea-runner must not regress to network_mode: container:*
     check_e_runner_no_container_network_mode(errors)
