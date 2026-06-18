@@ -99,3 +99,9 @@ tofu/**/*.tfvars
 # Local-only planning artifacts (brainstorming specs / implementation plans).
 # Kept out of this public repo; they reference internal host/network details.
 docs/superpowers/
+
+# Python bytecode cache — tests/check_docker_tasks.py is imported/run on every
+# `make test` (via CHECK 1), which generates tests/__pycache__/ and dirties the
+# working tree. It is build output, never a source artifact.
+__pycache__/
+*.pyc
