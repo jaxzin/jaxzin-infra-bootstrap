@@ -19,8 +19,10 @@ Checks:
      synology_dsm). Regression lock-in for the runner-on-a-generic-host
      rearchitecture — see docs/runbooks/gitea-runner-host.md.
   J) runner image Dockerfile must pip-install the Docker SDK (`docker`):
-     gitea-deploy.yml Play 2 runs community.docker locally in this image
-     (connection: local, co-located with the Gitea runner)
+     a cheap-insurance lock-in on the image-side copy. The real consumer
+     moved — gitea-deploy.yml Play 2 now runs community.docker OVER SSH on
+     GITEA_RUNNER_HOST (under become), where runner_host_seed installs the
+     SDK on the target; this guards the image copy from silent removal
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -370,11 +372,11 @@ def check_j_dockerfile_docker_sdk(errors):
     if "docker" not in names:
         errors.append(
             f"{DOCKERFILE_PATH}: the Docker SDK for Python (`docker`) is "
-            f"not pip-installed; community.docker.docker_container needs it "
-            f"because gitea-deploy.yml Play 2 runs locally in this image "
-            f"(connection: local, co-located with the Gitea runner) and "
-            f"manages the host Docker daemon. See "
-            f"docs/runbooks/gitea-runner-host.md."
+            f"not pip-installed. Kept as a cheap-insurance lock-in on the "
+            f"image-side copy: the real consumer moved — gitea-deploy.yml "
+            f"Play 2 now runs community.docker OVER SSH on GITEA_RUNNER_HOST "
+            f"(under become), where runner_host_seed installs the SDK on the "
+            f"target. See docs/runbooks/gitea-runner-host.md."
         )
 
 
@@ -451,8 +453,9 @@ def main():
     # (runner-on-a-generic-host rearchitecture lock-in)
     check_h_gitea_runner_socket_mount(errors)
 
-    # Run check J: runner image must pip-install the Docker SDK (Play 2
-    # runs community.docker locally in this image)
+    # Run check J: runner image must pip-install the Docker SDK
+    # (cheap-insurance lock-in; the real consumer is runner_host_seed on
+    # the SSH target, since Play 2 now runs community.docker over SSH)
     check_j_dockerfile_docker_sdk(errors)
 
     # Report results
