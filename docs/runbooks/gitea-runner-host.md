@@ -16,9 +16,9 @@ runner target are **different machines**, connected over SSH.
 1. Reachable over **SSH** from the controller, with a sudo-capable user
    (`GITEA_RUNNER_SSH_USER`) and the `GITEA_RUNNER_SSH_KEY` authorized. Play 2
    runs `become: true` with key auth and **no** become password, so that user
-   needs **passwordless sudo** — the one-time seed below installs it (a
-   `/etc/sudoers.d/gitea-runner` NOPASSWD drop-in). Without it Play 2 fails on
-   its first escalation with `Missing sudo password`.
+   needs **passwordless sudo** — the SD-image bake or the one-time seed below
+   installs it (a `/etc/sudoers.d/gitea-runner` NOPASSWD drop-in). Without it
+   Play 2 fails on its first escalation with `Missing sudo password`.
 2. Reachable **before** it is on the tailnet (the seed joins the tailnet),
    so `GITEA_RUNNER_HOST` must be LAN-resolvable at seed time.
 3. A systemd Linux host where Docker can be installed.
@@ -55,32 +55,73 @@ Set `runner_host_seed_accept_dns: true` only on a **dedicated** runner host
 whose tailnet split-DNS already covers its LAN domains (then the pin is
 unnecessary, though harmless).
 
-## SSH access + passwordless sudo (one-time seed, IaC)
+## Trust anchor: the runner SSH key + passwordless sudo
 
-The runner deploy logs in as a sudo-capable account (`GITEA_RUNNER_SSH_USER`).
-The seed authorizes a dedicated runner keypair **and** grants that account
-passwordless sudo (the NOPASSWD drop-in Play 2 needs). Run once (and on DR):
+Play 2 logs in as the `gitea-runner` account with the `GITEA_RUNNER_SSH_KEY`
+private key and runs `become: true` with **no** become password, so the target
+must already have (a) the dedicated runner **public** key authorized for that
+account and (b) **passwordless sudo** for it. That is the one bit of trust a
+host can't install over the very SSH+sudo it grants (circular), so it must be
+placed out-of-band. Two paths install the identical anchor.
+
+**The dedicated keypair (one time ever / on rotation).** `gitea-runner.pub` is
+already committed at `playbooks/files/gitea-runner.pub`. To (re)generate:
 
     ssh-keygen -t ed25519 -f gitea-runner -C gitea-runner -N ''
     # gitea-runner.pub  -> commit to playbooks/files/gitea-runner.pub
     # gitea-runner (private) -> paste into the GITEA_RUNNER_SSH_KEY CI secret
-    ansible-playbook seed-runner-ssh.yml -i 'GITEA_RUNNER_HOST,' -u <GITEA_RUNNER_SSH_USER> -K
 
-On the **first** run pass `-K` (`--ask-become-pass`): passwordless sudo isn't
-in place yet, so the sudoers task needs the account's sudo password once. The
-drop-in is written with `visudo` validation, so a malformed entry can never
-land and lock sudo out. Later runs are true no-ops and need no `-K`.
+### Primary: bake it into the SD image (new / replacement Pi)
 
-`seed-runner-ssh.yml` is idempotent — re-run any time / on DR. Install it
-using whatever existing SSH access you already have to the host (you cannot
-install the key over the key it installs).
+For a Raspberry Pi (microSD), provisioning **is** the SD flash, so the anchor
+rides along with it — no separate seed run, no interactive sudo password, and
+the Pi boots CI-ready. `provisioning/runner-host/firstrun.sh` creates the
+`gitea-runner` account, authorizes the committed key, installs the
+visudo-validated NOPASSWD drop-in, and enables SSH at first boot, then
+self-cleans.
+
+1. Flash Raspberry Pi OS (Bookworm) to the card.
+2. Mount the card's boot partition (`bootfs`) and copy the script there
+   (macOS path shown):
+
+       cp provisioning/runner-host/firstrun.sh /Volumes/bootfs/firstrun.sh
+
+3. Append the first-boot hook to `cmdline.txt` on that partition — one line, no
+   newline (Bookworm path shown; pre-Bookworm images use `/boot/firstrun.sh`):
+
+       systemd.run=/boot/firmware/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target
+
+4. Set the hostname so `GITEA_RUNNER_HOST` resolves on the LAN (via the Imager,
+   `raspi-config`, or DHCP/mDNS — host-specific, not baked in). Set the
+   `GITEA_RUNNER_SSH_USER` CI variable to `gitea-runner` to match the account
+   this script creates.
+5. Boot the Pi. It provisions on first boot, self-cleans, and reboots ready —
+   the GitHub bootstrap can then run Play 2 with no manual touch on the host.
+
+The embedded public key is locked to `playbooks/files/gitea-runner.pub` by
+Check L in `tests/check_docker_tasks.py`, so the baked anchor can't drift from
+the key CI authenticates with.
+
+### Reconcile / rotate on a running host (`seed-runner-ssh.yml`)
+
+For a Pi that is ALREADY running (to rotate the key, or to seed a host you
+didn't flash yourself), install the same anchor over SSH:
+
+    ansible-playbook seed-runner-ssh.yml -i 'GITEA_RUNNER_HOST,' -u gitea-runner -K
+
+Pass `-K` (`--ask-become-pass`) the first time if passwordless sudo isn't yet
+in place (e.g. a host that predates the baked image); the sudoers task needs the
+account's sudo password once. The drop-in is `visudo`-validated, so a malformed
+entry can never lock sudo out. The playbook is idempotent — re-run any time.
+(You can't install the key over the key it installs, so run it using existing
+access to the host.)
 
 ## CI configuration
 
 | Name | Kind | Purpose |
 |---|---|---|
 | `GITEA_RUNNER_HOST` | Secret | The target host (LAN-resolvable for pre-tailnet seeding). |
-| `GITEA_RUNNER_SSH_USER` | Variable | Sudo-capable SSH user on the target (the seed grants it passwordless sudo). |
+| `GITEA_RUNNER_SSH_USER` | Variable | Sudo-capable SSH user on the target; set to `gitea-runner` (the account the SD bake / seed creates with passwordless sudo). |
 | `GITEA_RUNNER_SSH_KEY` | Secret | Private key authorized on the target. |
 | `TS_AUTHKEY` | Secret | Reused to join the target to the tailnet. |
 | `GITEA_RUNNER_IMAGE` / `_NAME` / `_DATA_PATH` | Variable | Optional overrides (see role defaults). |

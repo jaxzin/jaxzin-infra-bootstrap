@@ -24,6 +24,11 @@ Checks:
      and no become password, so a missing NOPASSWD grant makes Play 2 die on
      its first escalation with "Missing sudo password" (regression lock-in —
      see docs/runbooks/gitea-runner-host.md).
+  L) provisioning/runner-host/firstrun.sh (the SD-image bake of the same trust
+     anchor) must install the NOPASSWD sudoers AND embed a runner public key
+     byte-identical to playbooks/files/gitea-runner.pub — so the baked anchor
+     can't silently drift from the key CI actually authenticates with (see
+     docs/runbooks/gitea-runner-host.md).
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -73,6 +78,15 @@ RUNNER_SSH_SEED_PLAYBOOK = "playbooks/seed-runner-ssh.yml"
 #                 (the module param), so the grant is genuinely password-free
 RUNNER_SSH_SEED_SUDOERS_MARKER = "sudoers"
 RUNNER_SSH_SEED_NOPASSWD_MARKERS = ("NOPASSWD", "nopassword")
+
+# The SD-image bake of the same trust anchor (Raspberry Pi OS first-boot
+# script). It embeds the runner public key inline (the Pi has no repo at first
+# boot), so that copy MUST stay byte-identical to the committed source of truth
+# — Check L locks it. RUNNER_PUBKEY_RE extracts the embedded key from the
+# `RUNNER_PUBKEY='...'` assignment in the script.
+FIRSTRUN_SCRIPT = "provisioning/runner-host/firstrun.sh"
+RUNNER_PUBKEY_FILE = "playbooks/files/gitea-runner.pub"
+RUNNER_PUBKEY_RE = re.compile(r"""RUNNER_PUBKEY=['"]([^'"]+)['"]""")
 
 GITEA_HOST_PORTS_REQUIRED = [
     re.compile(r'^["\']?127\.0\.0\.1:.*:3000["\']?$'),
@@ -449,6 +463,61 @@ def check_k_runner_seed_passwordless_sudo(errors):
         )
 
 
+def check_l_firstrun_anchor(errors):
+    """Check L: the SD-image bake (provisioning/runner-host/firstrun.sh) must
+    install the NOPASSWD sudoers AND embed a runner public key byte-identical
+    to playbooks/files/gitea-runner.pub.
+
+    firstrun.sh is the provisioning-time twin of seed-runner-ssh.yml: it bakes
+    the trust anchor into the SD image so a fresh Pi boots CI-ready. Because the
+    Pi has no repo at first boot, the public key is embedded inline — a second
+    copy that can drift from the committed source of truth. If it drifts, a
+    freshly-flashed host authorizes a stale key and CI silently can't log in.
+    Lock the two copies together. See docs/runbooks/gitea-runner-host.md.
+    """
+    try:
+        with open(FIRSTRUN_SCRIPT) as fh:
+            script = fh.read()
+    except FileNotFoundError:
+        errors.append(
+            f"{FIRSTRUN_SCRIPT}: File not found; this is the SD-image bake of "
+            f"the runner trust anchor (key + NOPASSWD sudo). See "
+            f"docs/runbooks/gitea-runner-host.md."
+        )
+        return
+
+    # Must install the passwordless-sudo drop-in (the part Imager can't do).
+    if "NOPASSWD" not in script or "sudoers" not in script:
+        errors.append(
+            f"{FIRSTRUN_SCRIPT}: must install a NOPASSWD /etc/sudoers.d drop-in "
+            f"for the deploy account, or a freshly-flashed Pi fails Play 2 with "
+            f"'Missing sudo password'. See docs/runbooks/gitea-runner-host.md."
+        )
+
+    # Embedded key must match the committed source of truth, byte for byte.
+    try:
+        with open(RUNNER_PUBKEY_FILE) as fh:
+            committed_key = fh.read().strip()
+    except FileNotFoundError:
+        errors.append(f"{RUNNER_PUBKEY_FILE}: File not found")
+        return
+
+    m = RUNNER_PUBKEY_RE.search(script)
+    if not m:
+        errors.append(
+            f"{FIRSTRUN_SCRIPT}: no embedded RUNNER_PUBKEY=... assignment found; "
+            f"the baked anchor must carry the runner public key inline (and it "
+            f"is locked to {RUNNER_PUBKEY_FILE})."
+        )
+    elif m.group(1).strip() != committed_key:
+        errors.append(
+            f"{FIRSTRUN_SCRIPT}: embedded RUNNER_PUBKEY has drifted from "
+            f"{RUNNER_PUBKEY_FILE}. A flashed Pi would authorize a stale key and "
+            f"CI couldn't log in. Re-sync the embedded key with the committed "
+            f"public key (single source of truth)."
+        )
+
+
 def main():
     errors = []
     warnings = []
@@ -483,6 +552,10 @@ def main():
     # Run check K: the runner SSH seed must grant passwordless sudo so Play 2's
     # `become: true` deploy doesn't fail with "Missing sudo password"
     check_k_runner_seed_passwordless_sudo(errors)
+
+    # Run check L: the SD-image bake (firstrun.sh) installs the same anchor and
+    # its embedded pubkey must not drift from playbooks/files/gitea-runner.pub
+    check_l_firstrun_anchor(errors)
 
     # Report results
     for w in warnings:
