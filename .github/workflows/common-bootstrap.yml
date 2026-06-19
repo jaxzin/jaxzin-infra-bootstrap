@@ -125,6 +125,6 @@ jobs:
             [nas]
             ${{ secrets.NAS_HOST }} ansible_user="${{ secrets.NAS_SSH_USER }}" ansible_become_password="${{ secrets.NAS_SSH_PASSWORD }}"
             [gitea_runner]
-            ${{ secrets.GITEA_RUNNER_HOST }} ansible_user="${{ vars.GITEA_RUNNER_SSH_USER }}" ansible_ssh_private_key_file="~/.ssh/gitea_runner_key" ansible_ssh_common_args="-o StrictHostKeyChecking=accept-new"
+            ${{ secrets.GITEA_RUNNER_HOST }} ansible_user="${{ vars.GITEA_RUNNER_SSH_USER }}" ansible_ssh_private_key_file="~/.ssh/gitea_runner_key" ansible_become_password="${{ secrets.GITEA_RUNNER_SUDO_PASSWORD }}" ansible_ssh_common_args="-o StrictHostKeyChecking=accept-new"
           requirements: galaxy-requirements.yml
           options: ${{ inputs.dry_run && '--check --diff' || '' }}
