@@ -82,7 +82,7 @@ jobs:
           cat /etc/resolv.conf
 
       - name: Checkout IaC
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Ansible in a venv if needed
         run: |
