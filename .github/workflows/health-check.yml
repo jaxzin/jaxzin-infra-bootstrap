@@ -145,18 +145,24 @@ jobs:
             *) echo "plan errored (exit ${ec})" ;;
           esac
 
+      # curl, not the Docker-based Ilshidur/action-discord: that action has no arm64
+      # image, so GitHub Actions building it on this self-hosted ARM runner fails with
+      # "exec format error" and orphans an intermediate container every run. curl ships
+      # in the runner image and is architecture-independent.
       - name: Notify Discord on drift
         if: steps.plan.outputs.exitcode == '2'
-        uses: Ilshidur/action-discord@0.3.2
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        with:
-          args: ":warning: tofu/network drift detected. Investigate the workflow run for details."
+        run: |
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"content": ":warning: tofu/network drift detected. Investigate the workflow run for details."}' \
+            "$DISCORD_WEBHOOK"
 
       - name: Notify Discord on plan error
         if: steps.plan.outputs.exitcode != '0' && steps.plan.outputs.exitcode != '2'
-        uses: Ilshidur/action-discord@0.3.2
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        with:
-          args: ":octagonal_sign: tofu/network drift check errored. Investigate the workflow run for details."
+        run: |
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"content": ":octagonal_sign: tofu/network drift check errored. Investigate the workflow run for details."}' \
+            "$DISCORD_WEBHOOK"
