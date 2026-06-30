@@ -1,0 +1,145 @@
+---
+# stack_reconcile — deploy the reconcile script, the 0600 webhook env-file, the
+# cron wrapper, the always-on watchdog container, and the host-cron fallback.
+# The Discord webhook is a credential: it lands ONLY in the 0600 root env-file
+# (templated with no_log: true), never on the cron line or in the container
+# env:. Best-effort throughout — Gitea is tier-1 / DR-first.
+
+- name: Ensure scripts, logs, and lock directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ stack_reconcile_scripts_dir }}"
+    - "{{ gitea_data_path }}/logs"
+    # Dedicated, secret-free lock dir. The watchdog bind-mounts THIS dir (not
+    # scripts/, which holds the B2 + OpenBao credential env-files) read-only so
+    # it can see the maintenance lock without gaining access to other secrets.
+    - "{{ stack_reconcile_lock_dir }}"
+
+# The watchdog bind-mounts the log FILE; create it as a regular file BEFORE the
+# container task so Docker doesn't auto-create the mount source as a directory
+# on a first-ever deploy (which would silently break the script's `>> $LOG`).
+- name: Ensure reconcile log exists and is not world-readable
+  ansible.builtin.file:
+    path: "{{ stack_reconcile_log_path }}"
+    state: touch
+    owner: root
+    group: root
+    mode: '0640'
+  changed_when: false
+
+- name: Deploy stack_reconcile.sh
+  ansible.builtin.template:
+    src: stack_reconcile.sh.j2
+    dest: "{{ stack_reconcile_script_path }}"
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart stack-reconcile watchdog
+
+- name: Create secure stack_reconcile env-file (holds the Discord webhook)
+  ansible.builtin.template:
+    src: reconcile.env.j2
+    dest: "{{ stack_reconcile_env_file }}"
+    owner: root
+    group: root
+    mode: '0600'  # Only root can read/write — the webhook is a credential.
+  no_log: true    # Keep the webhook out of deploy logs.
+  notify: Restart stack-reconcile watchdog
+
+- name: Deploy the stack_reconcile cron wrapper
+  ansible.builtin.template:
+    src: stack_reconcile_cron.sh.j2
+    dest: "{{ stack_reconcile_cron_wrapper_path }}"
+    owner: root
+    group: root
+    mode: '0750'
+  # The wrapper sets the non-secret RECONCILE_* env, sources the 0600 env-file
+  # for the webhook, then execs the reconcile script — so the cron line stays
+  # secret-free.
+
+- name: Deploy stack-reconcile watchdog container
+  community.docker.docker_container:
+    name: "{{ stack_reconcile_container_name }}"
+    image: "{{ stack_reconcile_image }}"
+    state: started
+    restart_policy: always
+    log_driver: json-file
+    log_options:
+      max-size: "10m"
+      max-file: "3"
+    networks:
+      - name: "{{ gitea_network_name }}"
+    # Only NON-secret RECONCILE_* vars here. The webhook is NOT passed via env:
+    # (docker inspect would leak it) — it is sourced at runtime from the
+    # read-only-mounted env-file inside the command below. The container loop
+    # deliberately does NOT set RECONCILE_ENSURE_CONTAINER: it must not revive
+    # its own dead self (that is the host-cron's job).
+    env:
+      DOCKER_BIN: "docker"
+      RECONCILE_CONTAINERS: "{{ stack_reconcile_containers }}"
+      RECONCILE_GATE: "{{ stack_reconcile_gate }}"
+      RECONCILE_GATE_DEPENDS_ON: "{{ stack_reconcile_gate_depends_on }}"
+      RECONCILE_LOCK: "{{ stack_reconcile_lock_path }}"
+      RECONCILE_DEBOUNCE: "{{ stack_reconcile_debounce_seconds | string }}"
+      RECONCILE_LOG: "{{ stack_reconcile_log_path }}"
+      RECONCILE_LOG_MAX_BYTES: "{{ stack_reconcile_log_max_bytes | string }}"
+      RECONCILE_INTERVAL: "{{ stack_reconcile_interval_seconds | string }}"
+    entrypoint: ["/bin/sh", "-c"]
+    # Loop: source the env-file (best-effort — webhook only), run the script,
+    # sleep RECONCILE_INTERVAL. The env-file and script are read from their
+    # IN-CONTAINER mount paths (/reconcile/...), NOT their host paths — the
+    # host scripts/ dir is deliberately not mounted (it holds other secrets).
+    command:
+      - >-
+        while true; do
+        [ -f /reconcile/reconcile.env ] && . /reconcile/reconcile.env;
+        /reconcile/stack_reconcile.sh;
+        sleep "${RECONCILE_INTERVAL:-30}";
+        done
+    volumes:
+      - "{{ stack_reconcile_script_path }}:/reconcile/stack_reconcile.sh:ro"
+      - "{{ stack_reconcile_env_file }}:/reconcile/reconcile.env:ro"
+      # Dedicated lock dir, read-only, mounted at its real host path so the
+      # in-container RECONCILE_LOCK check (`[ -f "$LOCK" ]`) sees the same file
+      # the backup writes host-side — this is what makes the watchdog honour
+      # the maintenance lock and not race gitea_dump.sh.
+      - "{{ stack_reconcile_lock_dir }}:{{ stack_reconcile_lock_dir }}:ro"
+      - "{{ stack_reconcile_log_path }}:{{ stack_reconcile_log_path }}"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+  notify: Restart stack-reconcile watchdog
+
+# Host-cron fallback: revives the watchdog itself if IT gets orphaned.
+# tafeen.synology.syno_crontab is `lineinfile state=present` with a literal
+# line and NO regexp — it is structurally append-only and cannot remove a
+# prior entry when the schedule changes (the verified root cause of the double
+# Monday run on the backup cron). Reconcile explicitly: purge every legacy
+# entry first, then add exactly one canonical entry. Keyed on the script /
+# wrapper path (derived from gitea_data_path), never a literal /volume1 path.
+- name: "Reconcile: remove any legacy stack-reconcile cron entries"
+  ansible.builtin.lineinfile:
+    path: /etc/crontab
+    regexp: '{{ item }}'
+    state: absent
+  loop:
+    - '{{ stack_reconcile_cron_wrapper_path | regex_escape }}'
+    - '{{ stack_reconcile_script_path | regex_escape }}'
+
+# Schedule the wrapper (NO inline env on the line — the secret stays in the
+# 0600 env-file the wrapper sources). All five cron fields + user are passed
+# EXPLICITLY: syno_crontab builds "minute hour monthday month weekday user job"
+# and its defaults are hour=12 / weekday=1, so passing only `minute` would make
+# the fallback run Mondays at noon — passing every field fixes that.
+- name: Schedule the host-cron reconcile fallback
+  ansible.builtin.import_role:
+    name: tafeen.synology.syno_crontab
+  vars:
+    minute: "{{ stack_reconcile_cron_minute }}"
+    hour: "*"
+    monthday: "*"
+    month: "*"
+    weekday: "*"
+    user: "root"
+    job: "{{ stack_reconcile_cron_wrapper_path }}"

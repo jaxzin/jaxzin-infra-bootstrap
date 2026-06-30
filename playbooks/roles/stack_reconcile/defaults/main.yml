@@ -1,0 +1,76 @@
+---
+# =============================================================================
+# stack_reconcile role — daemon-restart SELF-HEALING
+# =============================================================================
+# Revives the Gitea stack when an out-of-band Container Manager / Docker
+# daemon restart orphans its containers. Two redundant drivers run the SAME
+# host-neutral reconcile script (templates/stack_reconcile.sh.j2):
+#
+#   * an always-on watchdog CONTAINER (fast ~30s loop, talks to the mounted
+#     docker.sock), and
+#   * a root HOST-CRON fallback (~2 min) — the only driver that can revive
+#     the watchdog container itself if IT gets orphaned (the watchdog can't
+#     restart its own dead self).
+#
+# The reconcile honours a maintenance-lock file that gitea_backup holds while
+# it intentionally stops the stack for a consistent dump, so reconcile never
+# races the backup.
+#
+# THIS FILE IS THE SINGLE SOURCE OF TRUTH for stack_reconcile default
+# VALUES. meta/main.yml documents type/usage only — Ansible arg-spec default
+# keys are doc-only (never applied at runtime), so restating a value there
+# would just drift. Do not duplicate these literals.
+
+stack_reconcile_container_name: "stack-reconcile"
+
+# Tiny image that ships the docker CLI; the watchdog talks to the mounted
+# docker.sock with it. NOTE: this is a moving tag, not a digest. Because the
+# container mounts /var/run/docker.sock (full control of the daemon), a
+# digest-pin (docker:27-cli@sha256:...) is the recommended follow-up so a
+# silently-republished tag can't change what runs against the socket. Left as
+# a tag for now to keep the first cut simple.
+stack_reconcile_image: "docker:27-cli"
+
+# Host path to the docker client used by the CRON context (the watchdog
+# container uses the in-image `docker` on PATH instead).
+stack_reconcile_docker_bin: "/usr/local/bin/docker"
+
+stack_reconcile_scripts_dir: "{{ gitea_data_path }}/scripts"
+stack_reconcile_script_path: "{{ stack_reconcile_scripts_dir }}/stack_reconcile.sh"
+# Cron wrapper script: sets the NON-secret RECONCILE_* env, sources the 0600
+# env-file for the webhook, then execs the reconcile script. The bare cron
+# line carries NO secret (see tasks/main.yml + meta/main.yml).
+stack_reconcile_cron_wrapper_path: "{{ stack_reconcile_scripts_dir }}/stack_reconcile_cron.sh"
+# 0600 root-only env-file that holds the Discord webhook (a credential). It is
+# the ONLY place the webhook lands — never on the cron line, never in the
+# container env:, never in deploy logs (templated with no_log: true).
+stack_reconcile_env_file: "{{ stack_reconcile_scripts_dir }}/reconcile.env"
+
+stack_reconcile_log_path: "{{ gitea_data_path }}/logs/stack-reconcile.log"
+
+# Maintenance lock the backup holds while it stops the stack. It lives in a
+# DEDICATED, secret-free directory (not scripts/, which holds the B2 + OpenBao
+# credential env-files) so the watchdog can bind-mount just this dir read-only
+# to see the lock without gaining access to those secrets.
+# SINGLE SOURCE OF TRUTH shared with gitea_backup (gitea_backup_reconcile_lock_path)
+# — these two MUST match byte-for-byte so reconcile honours the same file and
+# never races the dump.
+stack_reconcile_lock_dir: "{{ gitea_data_path }}/run"
+stack_reconcile_lock_path: "{{ stack_reconcile_lock_dir }}/.reconcile-pause"
+
+# Dependency-ordered list of containers this reconcile owns. The tailscale
+# sidecar comes FIRST: gitea runs with network_mode: container:tailscale-gitea,
+# so gitea cannot start before the sidecar provides the network namespace.
+# Order: sidecar -> db -> gitea.
+stack_reconcile_containers: "tailscale-gitea gitea-db gitea"
+stack_reconcile_gate: "gitea"
+stack_reconcile_gate_depends_on: "gitea-db"
+
+stack_reconcile_interval_seconds: 30        # watchdog container loop cadence
+stack_reconcile_debounce_seconds: 90        # ignore stops younger than this
+stack_reconcile_log_max_bytes: 1048576      # trim RECONCILE_LOG past 1 MiB
+stack_reconcile_cron_minute: "*/2"          # host-cron fallback cadence
+
+# Optional Discord webhook for corrective-action alerts. Empty => alerts are
+# logged only (the script's `alert()` no-ops the HTTP call when HOOK is empty).
+stack_reconcile_discord_webhook: "{{ discord_webhook | default('') }}"

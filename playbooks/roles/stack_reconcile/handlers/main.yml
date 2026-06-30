@@ -1,0 +1,7 @@
+---
+# Bounce the watchdog so it re-reads the script / env-file after a change.
+- name: Restart stack-reconcile watchdog
+  community.docker.docker_container:
+    name: "{{ stack_reconcile_container_name }}"
+    restart: true
+  listen: Restart stack-reconcile watchdog

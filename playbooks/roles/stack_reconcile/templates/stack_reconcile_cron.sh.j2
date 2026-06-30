@@ -1,0 +1,35 @@
+#!/bin/sh
+# stack_reconcile_cron.sh — host-cron entry point for the reconcile fallback.
+#
+# WHY A WRAPPER (not an inline env on the cron line): the Discord webhook is a
+# credential. Putting it on the bare crontab line would leak it into
+# /etc/crontab, `ps`, and the syno_crontab deploy logs. Instead the cron line
+# is just this wrapper's path; the wrapper sets the NON-secret RECONCILE_* env,
+# sources the 0600 root-only env-file for the webhook, then execs the script.
+#
+# This is the ONLY driver that sets RECONCILE_ENSURE_CONTAINER: the cron must
+# be able to revive the watchdog container if IT gets orphaned. The watchdog's
+# own loop must NOT set it (a container cannot restart its own dead self).
+set -u
+
+DOCKER_BIN='{{ stack_reconcile_docker_bin }}'
+RECONCILE_CONTAINERS='{{ stack_reconcile_containers }}'
+RECONCILE_GATE='{{ stack_reconcile_gate }}'
+RECONCILE_GATE_DEPENDS_ON='{{ stack_reconcile_gate_depends_on }}'
+RECONCILE_LOCK='{{ stack_reconcile_lock_path }}'
+RECONCILE_DEBOUNCE='{{ stack_reconcile_debounce_seconds }}'
+RECONCILE_ENSURE_CONTAINER='{{ stack_reconcile_container_name }}'
+RECONCILE_LOG='{{ stack_reconcile_log_path }}'
+RECONCILE_LOG_MAX_BYTES='{{ stack_reconcile_log_max_bytes }}'
+export DOCKER_BIN RECONCILE_CONTAINERS RECONCILE_GATE RECONCILE_GATE_DEPENDS_ON \
+       RECONCILE_LOCK RECONCILE_DEBOUNCE RECONCILE_ENSURE_CONTAINER RECONCILE_LOG \
+       RECONCILE_LOG_MAX_BYTES
+
+# Pull in the webhook (RECONCILE_DISCORD_WEBHOOK) from the 0600 env-file.
+# Best-effort: a missing env-file must not abort the reconcile.
+if [ -f '{{ stack_reconcile_env_file }}' ]; then
+  . '{{ stack_reconcile_env_file }}'
+  export RECONCILE_DISCORD_WEBHOOK
+fi
+
+exec '{{ stack_reconcile_script_path }}'
