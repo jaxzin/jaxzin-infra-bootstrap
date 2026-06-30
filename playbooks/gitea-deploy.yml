@@ -152,7 +152,13 @@
     - name: Expose the runner registration token to Play 2
       set_fact:
         gitea_runner_registration_token: "{{ runner_reg_token_result.json.token }}"
-      when: not (lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true')
+      when:
+        # Dry-run/check mode skips the mint task above, so runner_reg_token_result
+        # has no `.json` — guard exactly like the tailnet-IP task below so the
+        # health check doesn't fail on an absent token (Play 2 already defaults
+        # gitea_runner_token to '' when this fact is unset).
+        - not (lookup('ansible.builtin.env', 'GITEA_ACTIONS', default='') == 'true')
+        - runner_reg_token_result.json.token | default('') | length > 0
 
     # Capture Gitea's TAILNET IP from its sidecar so Play 2 can pin
     # gitea.<tailnet> -> this IP in the runner container's /etc/hosts. This
