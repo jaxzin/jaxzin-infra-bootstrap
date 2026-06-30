@@ -1,0 +1,172 @@
+---
+# container_manager_config — enable Docker live-restore + pin json-file default
+# in the Synology Container Manager dockerd.json, applied via SIGHUP and VERIFIED
+# at runtime. SIGHUP is expected to apply live-restore on most builds (no
+# container stop), but on some Synology Docker 24.x builds it does not flip
+# LiveRestoreEnabled — so the role does not assert it as fact: it verifies, and
+# if live-restore is NOT active it surfaces a clear WARNING telling the operator
+# to run `synopkg restart ContainerManager` once (that bounces containers, but
+# the reconcile watchdog + restart=always self-heal it). Best-effort: the apply
+# + verify steps NEVER fail the deploy (Gitea is DR-first). The merge NEVER
+# clobbers unrelated keys: it slurps the existing JSON, combines only the keys
+# we own, and writes back atomically; a MALFORMED existing file degrades to
+# "leave untouched + warn", never an abort.
+
+- name: Read current dockerd.json (tolerate absence)
+  ansible.builtin.slurp:
+    src: "{{ cm_config_dockerd_path }}"
+  register: cm_config_raw
+  # Missing file is expected on a fresh host; absence must not abort the play.
+  failed_when: false
+
+- name: Decode current dockerd.json text (empty if absent or unreadable)
+  ansible.builtin.set_fact:
+    # cm_config_raw.content is defined only when slurp succeeded; on a missing
+    # file the task is skipped/failed and .content is absent → treat as ''.
+    cm_config_current_text: >-
+      {{ (cm_config_raw.content | b64decode)
+         if (cm_config_raw.content is defined) else '' }}
+
+- name: Parse current dockerd config (degrade to {} on malformed JSON, never abort)
+  # A bare `from_json` on a CORRUPT existing file would RAISE and hard-abort the
+  # play — the one step that could break this best-effort, DR-first role. Wrap
+  # the parse so a malformed file degrades instead: rescue sets parse_ok=false,
+  # which SKIPS the write below (file left untouched) and emits a clear warning.
+  block:
+    - name: Parse current dockerd config (empty object if absent)
+      ansible.builtin.set_fact:
+        cm_config_current: >-
+          {{ (cm_config_current_text | from_json)
+             if (cm_config_current_text | trim != '') else {} }}
+        cm_config_parse_ok: true
+  rescue:
+    - name: Treat malformed dockerd.json as empty and flag it (do NOT abort)
+      ansible.builtin.set_fact:
+        cm_config_current: {}
+        cm_config_parse_ok: false
+    - name: Warn that the existing dockerd.json is malformed (file left untouched)
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: existing {{ cm_config_dockerd_path }} is not valid JSON —
+          leaving it UNTOUCHED (no merge, no write) to avoid clobbering a file
+          a human may be mid-edit on. Fix or remove it, then re-run. This role
+          is best-effort and will not abort the deploy.
+
+- name: Compute desired dockerd config (merge, don't clobber other keys)
+  ansible.builtin.set_fact:
+    # Start from the current config so foreign keys (data-root, registry
+    # mirrors, etc.) survive untouched, then layer ONLY the keys we own.
+    cm_config_desired: >-
+      {{ cm_config_current
+         | combine({'live-restore': cm_config_live_restore})
+         | combine({'log-driver': cm_config_log_driver, 'log-opts': cm_config_log_opts}
+                   if cm_config_manage_log_driver else {}) }}
+
+- name: Report computed dockerd config delta
+  ansible.builtin.debug:
+    msg: >-
+      dockerd.json {{ 'will be updated' if cm_config_desired != cm_config_current
+      else 'already matches desired state (no change)' }}
+      at {{ cm_config_dockerd_path }} —
+      live-restore={{ cm_config_live_restore }},
+      manage-log-driver={{ cm_config_manage_log_driver }}.
+
+- name: Write merged dockerd.json (atomic; only when changed)
+  ansible.builtin.copy:
+    content: "{{ cm_config_desired | to_nice_json }}\n"
+    dest: "{{ cm_config_dockerd_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  register: cm_config_write
+  # Skip the write when the existing file is malformed: we treated it as {} only
+  # to keep the play going, so writing would clobber whatever a human is editing.
+  when:
+    - cm_config_parse_ok | bool
+    - cm_config_desired != cm_config_current
+
+- name: Apply config via dockerd SIGHUP reload (applies live-restore on most builds)
+  # live-restore is expected to be honored on a SIGHUP reload on most builds
+  # (non-disruptive — no container stop); the verify step below confirms it at
+  # runtime. Best-effort: a failed reload must not fail the deploy — the written
+  # config is reconciled by the next daemon restart (or the documented one-time
+  # Container Manager restart). changed_when is true so the reload surfaces in
+  # the play recap; failed_when is false so it never aborts.
+  #
+  # Target resolution is pidfile-FIRST and single-pid only: signalling the wrong
+  # (or several) processes is worse than skipping. Prefer the on-disk pidfile
+  # (Synology writes dockerd.pid; docker.pid is the upstream fallback), then
+  # `pidof -s dockerd` (-s = single pid). Only kill -HUP a single, non-empty pid.
+  ansible.builtin.shell: |
+    set -euo pipefail
+    pid=""
+    for f in /var/run/dockerd.pid /var/run/docker.pid; do
+      if [ -r "$f" ]; then
+        cand="$(cat "$f" 2>/dev/null | tr -d '[:space:]' || true)"
+        if [ -n "$cand" ] && kill -0 "$cand" 2>/dev/null; then
+          pid="$cand"
+          break
+        fi
+      fi
+    done
+    if [ -z "$pid" ]; then
+      pid="$(pidof -s dockerd 2>/dev/null | tr -d '[:space:]' || true)"
+    fi
+    if [ -z "$pid" ]; then
+      echo "container_manager_config: dockerd pid not found — reload skipped" >&2
+      exit 0
+    fi
+    kill -HUP "$pid"
+    echo "container_manager_config: sent SIGHUP to dockerd (pid $pid)"
+  args:
+    executable: /bin/bash
+  register: cm_config_reload
+  when:
+    - cm_config_apply | bool
+    - cm_config_write.changed | default(false)
+  changed_when: true
+  failed_when: false
+
+- name: Report reload outcome
+  ansible.builtin.debug:
+    msg: "{{ cm_config_reload.stdout | default('reload not run (no change or apply disabled)') }}"
+  when: cm_config_apply | bool
+
+- name: Verify live-restore is active at runtime (best-effort, non-blocking)
+  # Uses THIS role's own cm_config_docker_bin (NOT the reconcile role's var) so
+  # the "depends on nothing" contract holds; override per host / for tests. If
+  # SIGHUP did not flip LiveRestoreEnabled on this DSM build, the value below
+  # reads 'false' — see meta/main.yml for the one-time `synopkg restart
+  # ContainerManager` fallback. Never fails the deploy.
+  ansible.builtin.command:
+    cmd: >-
+      {{ cm_config_docker_bin }}
+      info --format '{{ "{{.LiveRestoreEnabled}}" }}'
+  register: cm_config_verify
+  changed_when: false
+  failed_when: false
+
+- name: Report live-restore status (active)
+  ansible.builtin.debug:
+    msg: >-
+      Docker live-restore enabled = {{ cm_config_verify.stdout | default('unknown') | trim }}
+  when: >-
+    not ((cm_config_live_restore | bool)
+         and (cm_config_verify.stdout | default('') | trim) not in ['true', ''])
+
+# Make a non-`true` verify result IMPOSSIBLE to miss in the play recap: surface
+# it as a distinct, actionable WARNING line instead of a buried debug message.
+# This NEVER fails the deploy — the operator runs the one-time restart on their
+# own schedule; the reconcile watchdog + restart=always self-heal the bounce.
+- name: WARN live-restore NOT active — operator action required (does NOT fail deploy)
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: live-restore NOT active (LiveRestoreEnabled={{
+      cm_config_verify.stdout | default('unknown') | trim }}) — SIGHUP did not
+      apply it on this DSM build. Run once: `sudo synopkg restart
+      ContainerManager`. That DOES bounce containers, but the dockerd.json is
+      already correct so live-restore is active afterward, and the stack
+      reconcile watchdog + restart=always self-heal anything that doesn't return.
+  when:
+    - cm_config_live_restore | bool
+    - (cm_config_verify.stdout | default('') | trim) not in ['true', '']

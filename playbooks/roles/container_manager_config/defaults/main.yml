@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# container_manager_config role — daemon-restart PREVENTION
+# =============================================================================
+# Hardens the Synology Container Manager / Docker Engine daemon so an
+# out-of-band Container Manager restart (DSM update, package repair, manual
+# bounce) does NOT tear down every running container:
+#
+#   * live-restore: true  — keep containers running across a dockerd restart.
+#   * log-driver: json-file (co-managed) — pin the daemon-wide log-driver
+#     default so a Container Manager update can't silently reset it back to
+#     `db`, which has repeatedly wedged the whole stack (see the project's
+#     log-driver-wedge history; meta/main.yml explains why this is co-owned).
+#
+# THIS FILE IS THE SINGLE SOURCE OF TRUTH for container_manager_config
+# default VALUES. meta/main.yml documents type/usage only — Ansible
+# arg-spec default keys are doc-only (never applied at runtime), so
+# restating a value there would just drift. Do not duplicate these literals.
+#
+# Gitea is tier-1 / DR-first: this role is best-effort. The apply (SIGHUP
+# reload) and verify steps NEVER fail the deploy (failed_when: false). The
+# worst case is "config written but not yet active", which the next daemon
+# restart (or the documented one-time Container Manager restart) reconciles.
+
+# Synology Container Manager's dockerd config file. This path is NOT under
+# /volume1 (it lives in the package's etc dir) and is therefore allowed by
+# the no-hardcoded-/volume1 rule — but it stays a role var for
+# host-neutrality (override per host / for tests).
+cm_config_dockerd_path: "/var/packages/ContainerManager/etc/dockerd.json"
+
+# Keep containers running across a dockerd restart. live-restore is expected to
+# be applied via SIGHUP on most builds (no container stop) — but this is
+# VERIFIED at runtime, not assumed: on some Synology Docker 24.x builds SIGHUP
+# does not flip LiveRestoreEnabled, in which case the verify step warns to run a
+# one-time `synopkg restart ContainerManager` (see meta/main.yml).
+cm_config_live_restore: true
+
+# Co-manage the json-file log-driver DEFAULT in dockerd.json. A Container
+# Manager update can reset the daemon default back to `db`, which wedges the
+# stack (autoheal can't recover db-driver containers). Pinning it here closes
+# that reset-prone gap. Set false to manage live-restore only.
+cm_config_manage_log_driver: true
+cm_config_log_driver: "json-file"
+cm_config_log_opts:
+  max-size: "10m"
+  max-file: "3"
+
+# Write the merged config AND apply it (SIGHUP reload). Set false to compute +
+# write the file but skip the live reload (check/report-only — e.g. a dry
+# run or a host where you want to apply the reload manually).
+cm_config_apply: true
+
+# Path to the docker client binary used by the verify step. This role owns its
+# OWN var (it does NOT borrow stack_reconcile_docker_bin from the reconcile
+# role) so the "depends on nothing" contract holds. Default is the Synology
+# Container Manager docker client; override per host / for tests.
+cm_config_docker_bin: "/usr/local/bin/docker"
