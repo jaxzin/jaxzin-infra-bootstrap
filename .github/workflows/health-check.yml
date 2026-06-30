@@ -4,6 +4,7 @@ name: Infrastructure Health Check
 on:
   schedule:
     - cron: '0 0 * * *'  # daily
+  workflow_dispatch:        # allow manual/on-demand runs (and fix verification)
 
 jobs:
   health-check:
