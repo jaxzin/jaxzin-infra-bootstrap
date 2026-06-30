@@ -623,6 +623,58 @@
           resolution (2026-06-05 incident).
 
     # ================================================================
+    # Check 16: the reconcile maintenance-lock path is a SINGLE SOURCE
+    #           OF TRUTH shared by stack_reconcile and gitea_backup —
+    #           a one-sided edit must trip the suite (architect's MAJOR)
+    # ================================================================
+    # stack_reconcile's watchdog stands down while a maintenance lock is
+    # present so it never races gitea_dump.sh. That only holds if BOTH roles
+    # point at the SAME lock file. The two defaults are spelled differently —
+    # stack_reconcile factors a `lock_dir` intermediate var, gitea_backup
+    # writes the path contiguously — so we assert each effective path ends in
+    # the stable, host-neutral suffix '/run/.reconcile-pause'. If anyone moves
+    # one side without the other, the backup writes one file while the watchdog
+    # watches another and the stand-down silently breaks. check_docker_tasks.py
+    # CHECK L resolves the indirection and asserts byte-identity; this is the
+    # belt-and-suspenders raw-template grep (CHECK 1 already runs that script).
+    - name: "CHECK 16: Read both reconcile lock-path defaults"
+      slurp:
+        src: "{{ item }}"
+      register: reconcile_lock_defaults_raw
+      loop:
+        - "{{ roles_dir }}/stack_reconcile/defaults/main.yml"
+        - "{{ roles_dir }}/gitea_backup/defaults/main.yml"
+
+    - name: "CHECK 16: Decode both reconcile lock-path defaults"
+      set_fact:
+        # stack_reconcile splits the path across lock_dir ('.../run') +
+        # lock_path ('{{ lock_dir }}/.reconcile-pause'); concatenating the two
+        # files' text lets one grep see the full '/run' + '/.reconcile-pause'
+        # surface on the stack_reconcile side while still matching the
+        # contiguous gitea_backup string.
+        stack_reconcile_defaults: "{{ reconcile_lock_defaults_raw.results[0].content | b64decode }}"
+        gitea_backup_defaults: "{{ reconcile_lock_defaults_raw.results[1].content | b64decode }}"
+
+    - name: "CHECK 16: Assert both roles reference the SAME reconcile lock suffix"
+      assert:
+        that:
+          # gitea_backup writes the path contiguously — match it directly.
+          - "'/run/.reconcile-pause' in gitea_backup_defaults"
+          # stack_reconcile factors the path through lock_dir; both halves must
+          # be present so the effective path is '.../run/.reconcile-pause'.
+          - "'/run' in stack_reconcile_defaults"
+          - "'/.reconcile-pause' in stack_reconcile_defaults"
+        fail_msg: >
+          The reconcile maintenance-lock path is a SINGLE SOURCE OF TRUTH
+          shared by stack_reconcile (stack_reconcile_lock_path) and gitea_backup
+          (gitea_backup_reconcile_lock_path); both must resolve to
+          '{{ '{{' }} gitea_data_path {{ '}}' }}/run/.reconcile-pause'. A
+          one-sided move makes gitea_dump.sh write one lock file while the
+          watchdog watches another, so reconcile stops standing down during a
+          backup and races the dump. Move BOTH together, never one. (See
+          check_docker_tasks.py CHECK L for the byte-identity assertion.)
+
+    # ================================================================
     # Cleanup
     # ================================================================
     - name: Clean up rendered test files

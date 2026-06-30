@@ -44,7 +44,9 @@ galaxy_info:
 # Maintenance-lock contract with gitea_backup
 # -----------------------------------------------------------------------------
 # stack_reconcile_lock_path MUST equal gitea_backup_reconcile_lock_path
-# byte-for-byte (both default to {{ gitea_data_path }}/scripts/.reconcile-pause).
+# (both resolve to {{ gitea_data_path }}/run/.reconcile-pause — a dedicated,
+# secret-free dir the watchdog can bind-mount read-only without exposing the
+# B2/OpenBao creds in scripts/).
 # gitea_backup's dump script CREATES the lock while it intentionally stops the
 # stack for a consistent dump and REMOVES it on any exit (trap). reconcile
 # checks the lock FIRST and stands down (exit 0, no action) while it is

@@ -20,6 +20,8 @@ The `gitea-deploy.yml` playbook automatically **configures and enables** a daily
 
 `gitea-deploy.yml` is **two plays in one invocation**: Play 1 provisions the Gitea server on the NAS; **Play 2 deploys the Gitea Actions runner over SSH to `GITEA_RUNNER_HOST`** (via the `runner_host_seed` + `gitea_runner` roles — see `docs/runbooks/gitea-runner-host.md`). Running the bootstrap workflow therefore brings the runner online *as part of bootstrap* — there is **no separate "deploy the runner" step** and no Gitea-side trigger to fire.
 
+> **Self-healing daemon restarts:** the Gitea stack now survives an out-of-band Container Manager / Docker daemon restart (e.g. a DSM auto-update) on its own — Play 1 enables Docker `live-restore` (so a daemon restart no longer stops containers) and deploys a reconcile watchdog (which revives any orphaned container, in dependency order, within minutes). This addresses the 2026-06-30 gitea-db orphan incident where a daemon restart left `gitea` crash-looping for ~3.5h. Full behavior, the backup maintenance-lock contract, the one-time `live-restore` enablement step, and the manual recovery one-liner: `docs/runbooks/gitea-stack-reconcile.md`.
+
 ### The manual seed
 
 Disaster recovery has **one** irreducible, documented manual seed (a committed, version-controlled procedure — not improvisation): a self-hosted **GitHub Actions runner** on a dedicated tailnet-joined Linux host, acting as the bootstrap controller. The Gitea runner host (`GITEA_RUNNER_HOST`) is a separate machine — its Docker environment and deploy user are provisioned automatically by the `runner_host_seed` role when the bootstrap workflow runs.
