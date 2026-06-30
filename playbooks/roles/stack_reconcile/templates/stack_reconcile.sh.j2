@@ -1,0 +1,132 @@
+#!/bin/sh
+# stack_reconcile.sh — revive containers orphaned by a Docker daemon restart.
+# Runs in TWO contexts with identical logic:
+#   * watchdog container (loop) — DOCKER_BIN=docker, talks to mounted socket.
+#       Image is Alpine-based, so `date` is busybox (no GNU `-d`).
+#   * host cron (fallback)      — DOCKER_BIN={{ stack_reconcile_docker_bin }}.
+#       Synology host ships GNU `date` (accepts `-d <rfc3339>`).
+# Best-effort: never exits non-zero (Gitea is DR-first; a reconcile error
+# must not cascade). `set -u` (NOT `set -e`) — a failed `inspect` must not
+# abort the loop. Honors a maintenance lock so it NEVER races gitea_dump.sh.
+set -u
+DOCKER="${DOCKER_BIN:-docker}"
+CONTAINERS="${RECONCILE_CONTAINERS:?set RECONCILE_CONTAINERS}"
+GATE="${RECONCILE_GATE:-}"
+GATE_DEP="${RECONCILE_GATE_DEPENDS_ON:-}"
+LOCK="${RECONCILE_LOCK:?set RECONCILE_LOCK}"
+DEBOUNCE="${RECONCILE_DEBOUNCE:-90}"
+ENSURE="${RECONCILE_ENSURE_CONTAINER:-}"
+LOG="${RECONCILE_LOG:-/dev/stderr}"
+HOOK="${RECONCILE_DISCORD_WEBHOOK:-}"
+DRYRUN="${RECONCILE_DRYRUN:-0}"
+# Max bytes for RECONCILE_LOG before it's trimmed to its tail (see size guard
+# below). Default 1 MiB. The log is appended every loop and grows unbounded
+# under any sustained abnormal state, so cap it; 0/empty disables the trim.
+LOG_MAX_BYTES="${RECONCILE_LOG_MAX_BYTES:-1048576}"
+
+log() { printf '%s reconcile: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >> "$LOG" 2>/dev/null || true; }
+alert() {
+  log "$1"
+  [ -n "$HOOK" ] || return 0
+  # Sanitize before embedding in the JSON body: escape backslash and double
+  # quote, and strip control chars (0x00-0x1f), so a message containing any of
+  # them can't break out of the JSON string. Best-effort throughout.
+  safe="$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\000-\037')"
+  # best-effort, short timeout, never block the loop
+  wget -q -T 5 -O /dev/null --post-data="$(printf '{"content":"[stack_reconcile] %s"}' "$safe")" \
+       --header='Content-Type: application/json' "$HOOK" 2>/dev/null || true
+}
+
+inspect() { $DOCKER inspect -f "$1" "$2" 2>/dev/null; }
+
+# epoch of a docker FinishedAt RFC3339Nano string; empty on parse failure.
+# Portable across the two runtimes: try GNU `date -d` (host cron), then fall
+# back to busybox `date -D ... -d` (Alpine watchdog), then give up (empty).
+finished_epoch() {
+  fa="$(inspect '{{ "{{.State.FinishedAt}}" }}' "$1")"
+  case "$fa" in ''|0001-01-01*) echo ""; return;; esac
+  # strip sub-second precision + Z so both date implementations parse it.
+  d="$(printf '%s' "$fa" | sed 's/\.[0-9]*Z$/Z/')"
+  # GNU date (Synology host cron) accepts -d <rfc3339> directly.
+  date -u -d "$d" +%s 2>/dev/null && return
+  # busybox date (Alpine watchdog) needs an explicit input format via -D.
+  date -u -D '%Y-%m-%dT%H:%M:%SZ' -d "$d" +%s 2>/dev/null && return
+  echo ""
+}
+
+start_one() {
+  c="$1"
+  if [ "$DRYRUN" = "1" ]; then log "DRYRUN would start $c"; return 0; fi
+  if $DOCKER start "$c" >/dev/null 2>&1; then alert "started orphaned container '$c'"; else log "FAILED to start '$c'"; fi
+}
+
+# --- size guard: cap RECONCILE_LOG so it can't grow unbounded ---------------
+# RECONCILE_LOG is a Docker bind-mounted FILE, so we must NOT mv/rename it:
+# rename() returns EBUSY on bind-mount targets (same constraint the
+# tailscale_sidecar role documents for resolv.conf). Trim in place via
+# open+truncate (`> "$LOG"`), staging the tail through /tmp first. Best-effort:
+# every step is guarded so a trim failure never aborts reconcile.
+if [ "$LOG_MAX_BYTES" -gt 0 ] 2>/dev/null && [ -f "$LOG" ]; then
+  sz="$(wc -c < "$LOG" 2>/dev/null || echo 0)"
+  if [ "$sz" -gt "$LOG_MAX_BYTES" ] 2>/dev/null; then
+    tail -c "$(( LOG_MAX_BYTES / 2 ))" "$LOG" > "/tmp/reclog.$$" 2>/dev/null \
+      && cat "/tmp/reclog.$$" > "$LOG" 2>/dev/null
+    rm -f "/tmp/reclog.$$"
+  fi
+fi
+
+# --- 0. maintenance lock: a backup/maintenance window is in progress -------
+if [ -f "$LOCK" ]; then log "maintenance lock present ($LOCK) — skipping"; exit 0; fi
+
+now="$(date -u +%s)"
+
+# --- 1. ensure the watchdog container itself is running (cron fallback) -----
+if [ -n "$ENSURE" ]; then
+  st="$(inspect '{{ "{{.State.Status}}" }}' "$ENSURE")"
+  if [ -n "$st" ] && [ "$st" != "running" ]; then start_one "$ENSURE"; fi
+fi
+
+# --- 2. revive orphaned restart=always containers (dependency order) -------
+# shellcheck disable=SC2086
+for c in $CONTAINERS; do
+  st="$(inspect '{{ "{{.State.Status}}" }}' "$c")"
+  [ -n "$st" ] || { log "no such container '$c'"; continue; }
+  pol="$(inspect '{{ "{{.HostConfig.RestartPolicy.Name}}" }}' "$c")"
+  [ "$pol" = "always" ] || { log "skip '$c' (restart policy '$pol')"; continue; }
+  [ "$st" = "running" ] && continue
+  fe="$(finished_epoch "$c")"
+  if [ -n "$fe" ]; then
+    age=$(( now - fe ))
+    if [ "$age" -lt "$DEBOUNCE" ]; then log "'$c' down ${age}s < debounce ${DEBOUNCE}s — wait"; continue; fi
+  else
+    # Age unknown (FinishedAt unset/zero, or NEITHER date form could parse it).
+    # We already know status != running and restart-policy == always, and the
+    # maintenance lock is clear. An orphan with unknown age should still be
+    # revived rather than left dead, so we SKIP the debounce gate and proceed
+    # to start. This deliberately leans on the lock + restart-policy=always
+    # guards above (a maintenance window holds the lock; a non-always policy is
+    # skipped before we get here) as the safety net in place of the debounce.
+    log "'$c' down but age unknown — skipping debounce, will start"
+  fi
+  start_one "$c"
+done
+
+# --- 3. dependency gate / crash-loop break ---------------------------------
+# If the gated container (gitea) is UNHEALTHY but its dependency (gitea-db)
+# IS healthy, give gitea one clean restart so it stops crash-looping against
+# what was a missing DB. (Idempotent: only acts when gate is unhealthy.)
+# We deliberately key on gate_h == "unhealthy" — NOT just "!= healthy" — so a
+# gate still in "starting" is left alone. Restarting during the healthcheck
+# start_period would reset start_period and prevent the gate from ever
+# finishing boot, i.e. we'd thrash gitea every loop.
+if [ -n "$GATE" ] && [ -n "$GATE_DEP" ]; then
+  dep_h="$(inspect '{{ "{{if .State.Health}}{{.State.Health.Status}}{{end}}" }}' "$GATE_DEP")"
+  gate_h="$(inspect '{{ "{{if .State.Health}}{{.State.Health.Status}}{{end}}" }}' "$GATE")"
+  gate_st="$(inspect '{{ "{{.State.Status}}" }}' "$GATE")"
+  if [ "$dep_h" = "healthy" ] && [ "$gate_st" = "running" ] && [ "$gate_h" = "unhealthy" ]; then
+    if [ "$DRYRUN" = "1" ]; then log "DRYRUN would restart gate '$GATE'";
+    elif $DOCKER restart "$GATE" >/dev/null 2>&1; then alert "restarted '$GATE' (dep '$GATE_DEP' healthy, gate was '$gate_h')";
+    else log "FAILED to restart gate '$GATE'"; fi
+  fi
+fi
+exit 0

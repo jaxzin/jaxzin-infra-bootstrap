@@ -20,6 +20,11 @@ GITEA_APP_INI_VOLUME="{{ gitea_app_ini_path_host }}:{{ gitea_app_ini_path_contai
 GITEA_SECRETS_VOLUME="{{ gitea_data_path }}/conf/secrets:/etc/gitea/secrets:ro"
 GITEA_NETWORK_NAME="{{ gitea_network_name | default('host') }}"
 
+# Maintenance lock shared with the stack_reconcile role. While this file
+# exists, reconcile stands down so it never races the intentional stop below.
+# SINGLE SOURCE OF TRUTH for the path — must match stack_reconcile_lock_path.
+RECONCILE_LOCK="{{ gitea_backup_reconcile_lock_path }}"
+
 # --- Functions ---
 
 # The main cleanup function. This will always be called when the script exits.
@@ -44,6 +49,17 @@ cleanup() {
       "$HOST_DATA_DIR/scripts/reconcile-gitea-oauth2.sh" ) \
       || echo "WARN: OIDC source reconcile skipped/failed (non-fatal)."
   fi
+
+  # Release the maintenance lock LAST — only once the stack is back up. This
+  # is a death-safety-net for reconcile, NOT an early release: stack_reconcile
+  # stands down while the lock exists, so releasing it before our own
+  # `docker start` above would let the watchdog race the backup's own restart
+  # on the failure path (Gitea still stopped and aged past the reconcile
+  # debounce). Releasing last loses no guarantee — the EXIT/INT/TERM trap
+  # still runs cleanup() (and thus this rm) on every exit path — and it closes
+  # that race. Done here (not a second trap) so it runs on ANY exit and the
+  # existing EXIT trap below is preserved, not clobbered.
+  rm -f "$RECONCILE_LOCK"
 }
 
 # --- Script Body ---
@@ -60,9 +76,18 @@ chmod 600 "$LOG_FILE"
 exec >> "$LOG_FILE" 2>&1
 
 # Set the trap to call the cleanup function on any script exit.
-trap cleanup EXIT
+# cleanup() releases the maintenance lock (and restarts Gitea), so arm the
+# trap BEFORE acquiring the lock to guarantee release on every exit path.
+trap cleanup EXIT INT TERM
 
 echo "--- Starting Gitea Dump and B2 Upload: $(date) ---"
+
+# Acquire the maintenance lock: tell stack_reconcile to stand down while this
+# script intentionally stops the stack to take a consistent dump. The trap
+# above guarantees release even on failure.
+echo "INFO: Acquiring maintenance lock for stack_reconcile: $RECONCILE_LOCK"
+mkdir -p "$(dirname "$RECONCILE_LOCK")"
+: > "$RECONCILE_LOCK"
 
 # 0. Source credentials
 echo "INFO: Sourcing credentials..."

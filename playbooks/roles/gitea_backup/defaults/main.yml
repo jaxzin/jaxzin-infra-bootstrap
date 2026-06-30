@@ -1,0 +1,6 @@
+---
+# Maintenance lock the dump script holds while it intentionally stops the
+# stack for a consistent dump. SINGLE SOURCE OF TRUTH shared with the
+# stack_reconcile role (stack_reconcile_lock_path) — must match byte-for-byte
+# so reconcile honours the same file and never races the backup.
+gitea_backup_reconcile_lock_path: "{{ gitea_data_path }}/scripts/.reconcile-pause"
