@@ -1,0 +1,163 @@
+---
+galaxy_info:
+  author: Brian R. Jackson
+  description: >-
+    Self-heals the Gitea stack after an out-of-band Container Manager / Docker
+    daemon restart orphans its containers. Deploys a host-neutral reconcile
+    script driven by BOTH an always-on watchdog container (fast ~30s loop) and
+    a root host-cron fallback (~2 min). Honours a maintenance-lock that
+    gitea_backup holds during dumps so reconcile never races the backup.
+  license: MIT
+  min_ansible_version: "2.12"
+  platforms:
+    - name: GenericLinux
+      versions:
+        - all
+
+# -----------------------------------------------------------------------------
+# Host contract
+# -----------------------------------------------------------------------------
+# Runs on the NAS (gitea-deploy.yml Play 1, hosts: nas, become: true). Expects:
+#   1. A running Docker daemon with the Gitea stack containers
+#      (tailscale-gitea, gitea-db, gitea) defined with restart_policy: always.
+#   2. The docker network gitea_network_name to attach the watchdog to.
+#   3. A writable {{ gitea_data_path }} for scripts + logs.
+#   4. The Synology host docker client at stack_reconcile_docker_bin (cron
+#      context) and GNU `date` on the host (busybox `date` in the watchdog
+#      image — the script handles both).
+#
+# -----------------------------------------------------------------------------
+# docker.sock privilege rationale
+# -----------------------------------------------------------------------------
+# The watchdog container bind-mounts /var/run/docker.sock so it can `docker
+# start` / `docker restart` orphaned stack containers. Mounting the socket is
+# effectively root-on-the-host: any process in the container can control the
+# daemon. This is accepted deliberately — reviving daemon-restart orphans
+# REQUIRES daemon control, and the container runs a single fixed loop calling
+# our own audited reconcile script. Hardening follow-ups (not yet applied):
+#   * digest-pin stack_reconcile_image (docker:27-cli@sha256:...) so a
+#     republished tag can't change what runs against the socket; and
+#   * a socket proxy (tecnativa/docker-socket-proxy) restricting the API
+#     surface to start/restart/inspect.
+#
+# -----------------------------------------------------------------------------
+# Maintenance-lock contract with gitea_backup
+# -----------------------------------------------------------------------------
+# stack_reconcile_lock_path MUST equal gitea_backup_reconcile_lock_path
+# (both resolve to {{ gitea_data_path }}/run/.reconcile-pause — a dedicated,
+# secret-free dir the watchdog can bind-mount read-only without exposing the
+# B2/OpenBao creds in scripts/).
+# gitea_backup's dump script CREATES the lock while it intentionally stops the
+# stack for a consistent dump and REMOVES it on any exit (trap). reconcile
+# checks the lock FIRST and stands down (exit 0, no action) while it is
+# present, so it never fights the backup. If the dump dies before restarting
+# the stack, the trap still clears the lock and reconcile becomes the safety
+# net that brings the stack back.
+#
+# -----------------------------------------------------------------------------
+# Secret handling
+# -----------------------------------------------------------------------------
+# The Discord webhook (stack_reconcile_discord_webhook) is a credential and is
+# written ONLY to the 0600 root env-file (reconcile.env, templated no_log:true).
+# It is sourced at runtime by the cron wrapper and the watchdog command — never
+# placed on the cron line, in the container env:, or in deploy logs.
+
+argument_specs:
+  main:
+    short_description: The main entry point for the stack_reconcile role.
+    # NOTE: argument_specs default keys are documentation-only in Ansible (the
+    # runtime value always comes from defaults/main.yml). To keep ONE source of
+    # truth and avoid drift, this spec declares NO default values — it documents
+    # type/usage and points to defaults/main.yml.
+    options:
+      stack_reconcile_container_name:
+        type: "str"
+        description: >-
+          Name of the always-on watchdog container. Default in
+          defaults/main.yml. Also passed to the host-cron as
+          RECONCILE_ENSURE_CONTAINER so the cron can revive the watchdog if it
+          is orphaned.
+      stack_reconcile_image:
+        type: "str"
+        description: >-
+          Image for the watchdog (ships the docker CLI). Default in
+          defaults/main.yml. A digest-pin is a recommended follow-up because
+          the container mounts docker.sock.
+      stack_reconcile_docker_bin:
+        type: "str"
+        description: >-
+          Host path to the docker client used by the cron context. Default in
+          defaults/main.yml. (The watchdog uses the in-image `docker`.)
+      stack_reconcile_scripts_dir:
+        type: "str"
+        description: >-
+          Directory for the reconcile script, cron wrapper, and env-file.
+          Derived from gitea_data_path; default in defaults/main.yml.
+      stack_reconcile_script_path:
+        type: "str"
+        description: >-
+          Path to the deployed reconcile script. Derived; default in
+          defaults/main.yml.
+      stack_reconcile_cron_wrapper_path:
+        type: "str"
+        description: >-
+          Path to the cron wrapper that sets non-secret env, sources the
+          env-file, and execs the script. Derived; default in defaults/main.yml.
+      stack_reconcile_env_file:
+        type: "str"
+        description: >-
+          0600 root env-file holding the Discord webhook — the ONLY place the
+          webhook lands. Derived; default in defaults/main.yml.
+      stack_reconcile_log_path:
+        type: "str"
+        description: >-
+          Reconcile log path (bind-mounted into the watchdog). Derived; default
+          in defaults/main.yml.
+      stack_reconcile_lock_path:
+        type: "str"
+        description: >-
+          Maintenance lock honoured during backups. MUST equal
+          gitea_backup_reconcile_lock_path byte-for-byte. Default in
+          defaults/main.yml.
+      stack_reconcile_containers:
+        type: "str"
+        description: >-
+          Space-separated, dependency-ordered list of containers reconcile
+          owns. The tailscale sidecar comes first (gitea uses network_mode:
+          container:<sidecar>). Default in defaults/main.yml.
+      stack_reconcile_gate:
+        type: "str"
+        description: >-
+          Container that must wait on a dependency (the crash-loop break
+          target). Default in defaults/main.yml.
+      stack_reconcile_gate_depends_on:
+        type: "str"
+        description: >-
+          The gate's dependency that must be healthy first. Default in
+          defaults/main.yml.
+      stack_reconcile_interval_seconds:
+        type: "int"
+        description: >-
+          Watchdog container loop cadence (seconds). Default in
+          defaults/main.yml.
+      stack_reconcile_debounce_seconds:
+        type: "int"
+        description: >-
+          Ignore container stops younger than this (seconds). Default in
+          defaults/main.yml.
+      stack_reconcile_log_max_bytes:
+        type: "int"
+        description: >-
+          Trim the reconcile log past this size (bytes); 0 disables. Default in
+          defaults/main.yml.
+      stack_reconcile_cron_minute:
+        type: "str"
+        description: >-
+          Cron minute field for the host-cron fallback (the other four fields
+          are fixed to '*' explicitly). Default in defaults/main.yml.
+      stack_reconcile_discord_webhook:
+        type: "str"
+        no_log: true
+        description: >-
+          Optional Discord webhook for corrective-action alerts. Written ONLY
+          to the 0600 env-file. Default in defaults/main.yml.

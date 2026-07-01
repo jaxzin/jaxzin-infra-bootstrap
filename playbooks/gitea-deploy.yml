@@ -23,6 +23,12 @@
       syno_pkg_state: present
       tags: docker
   tasks:
+    - name: Harden Container Manager daemon (live-restore + json-file default)
+      include_role:
+        name: container_manager_config
+      tags:
+        - daemon
+
     - name: Debug all environment variables
       debug:
         var: ansible_env
@@ -199,6 +205,12 @@
         gitea_oidc_reconcile_bao_token: "{{ lookup('ansible.builtin.env', 'GITEA_OIDC_RECONCILE_BAO_TOKEN') }}"
       tags:
         - backup_config
+
+    - name: Reconcile the Gitea stack across daemon restarts
+      include_role:
+        name: stack_reconcile
+      tags:
+        - reconcile
 
     - name: Self-heal Gitea OAuth2 source after deploy (best-effort, non-blocking)
       # Re-asserts the authentik source so drift can't silently strip
