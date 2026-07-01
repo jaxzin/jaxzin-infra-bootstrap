@@ -35,9 +35,18 @@
   block:
     - name: Parse current dockerd config (empty object if absent)
       ansible.builtin.set_fact:
+        # ansible-core 2.19 Jinja native types coerce a decoded JSON *object*
+        # into a dict (a JSON object like {"log-driver":"json-file"} is also a
+        # valid Python literal), so cm_config_current_text may ALREADY be a
+        # mapping — `from_json` on it then raises "the JSON object must be str,
+        # bytes or bytearray, not dict". Handle both shapes: use it directly
+        # when it's already a mapping; only from_json a non-empty string;
+        # empty/absent → {}. (`| string` guards trim against a native dict.)
         cm_config_current: >-
-          {{ (cm_config_current_text | from_json)
-             if (cm_config_current_text | trim != '') else {} }}
+          {{ cm_config_current_text
+             if (cm_config_current_text is mapping)
+             else ((cm_config_current_text | from_json)
+                   if (cm_config_current_text | string | trim != '') else {}) }}
         cm_config_parse_ok: true
   rescue:
     - name: Treat malformed dockerd.json as empty and flag it (do NOT abort)
