@@ -2,6 +2,12 @@
 set -e
 source {{ certbot_data_path }}/dnsimple_env.sh
 
+# Discord webhook is a credential — sourced at runtime from its own 0600 root
+# env-file, never inlined into this (world-readable) script. Optional: if the
+# file is absent or DISCORD_WEBHOOK is empty, notifications simply no-op.
+DISCORD_WEBHOOK_ENV="{{ certbot_data_path }}/discord_webhook.env"
+[ -f "${DISCORD_WEBHOOK_ENV}" ] && source "${DISCORD_WEBHOOK_ENV}"
+
 CERT_DIR="{{ certbot_data_path }}/certs"
 LIVE_DIR="${CERT_DIR}/live/{{ certbot_domain }}"
 FULLCHAIN_PATH="${LIVE_DIR}/fullchain.pem"
@@ -14,9 +20,9 @@ send_notification() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') [Certbot] ${subject}: ${message}"
   # Use Synology's native notification system
   /usr/syno/bin/synoservicectl --notify "${subject}" "${message}"
-  # If you prefer Discord, uncomment and configure the following:
-  if [ -n "{{ discord_webhook }}" ]; then
-    curl -H "Content-Type: application/json" -X POST -d "{\"username\": \"Certbot Alert\", \"content\": \"${subject}: ${message}\"}" "{{ discord_webhook }}"
+  # Also post to Discord when a webhook is configured (sourced above).
+  if [ -n "${DISCORD_WEBHOOK}" ]; then
+    curl -H "Content-Type: application/json" -X POST -d "{\"username\": \"Certbot Alert\", \"content\": \"${subject}: ${message}\"}" "${DISCORD_WEBHOOK}"
   fi
 }
 

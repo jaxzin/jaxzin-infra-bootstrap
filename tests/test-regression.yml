@@ -799,6 +799,73 @@
           check_docker_tasks.py CHECK L for the byte-identity assertion.)
 
     # ================================================================
+    # Check 16: certbot never inlines the Discord webhook credential into
+    #           the world-readable renew-cert.sh; it sources it from a
+    #           0600 root no_log env-file at runtime.
+    # ================================================================
+    # Templating the webhook variable directly into renew-cert.sh (rendered
+    # 0750, previously 0755) put the credential in cleartext in an on-disk
+    # script readable by any local user. The secure pattern (mirrors
+    # gitea_backup's b2_credentials.env / gitea_oidc_reconcile.env): the value
+    # renders ONLY into discord_webhook.env (root 0600, template no_log), and
+    # the script sources it and uses $DISCORD_WEBHOOK by name. We render BOTH
+    # templates with a sentinel secret and assert where it does (env-file) and
+    # does not (script) land — the render-and-inspect style of CHECK 3/4/7, so
+    # a coincidental substring (the env-FILE name) can't mask a re-inlined value.
+    - name: "CHECK 16: Render renew-cert.sh.j2 with a sentinel webhook secret"
+      template:
+        src: "{{ roles_dir }}/certbot/templates/renew-cert.sh.j2"
+        dest: /tmp/test-renew-cert-rendered.sh
+      vars:
+        certbot_data_path: /tmp/certbot-test
+        certbot_domain: nas.test-tailnet.ts.net
+        certbot_email: test@example.com
+        dsm_cert_name: test-cert
+        discord_webhook: "SENTINEL_DISCORD_WEBHOOK_DO_NOT_INLINE"
+
+    - name: "CHECK 16: Render discord_webhook.env.j2 with the same sentinel"
+      template:
+        src: "{{ roles_dir }}/certbot/templates/discord_webhook.env.j2"
+        dest: /tmp/test-discord-webhook-env-rendered
+      vars:
+        discord_webhook: "SENTINEL_DISCORD_WEBHOOK_DO_NOT_INLINE"
+
+    - name: "CHECK 16: Read the rendered artifacts + certbot tasks"
+      slurp:
+        src: "{{ item }}"
+      register: certbot_webhook_raw
+      loop:
+        - /tmp/test-renew-cert-rendered.sh
+        - /tmp/test-discord-webhook-env-rendered
+        - "{{ roles_dir }}/certbot/tasks/main.yml"
+
+    - name: "CHECK 16: Decode the rendered artifacts + certbot tasks"
+      set_fact:
+        certbot_rendered_script: "{{ certbot_webhook_raw.results[0].content | b64decode }}"
+        certbot_rendered_env: "{{ certbot_webhook_raw.results[1].content | b64decode }}"
+        certbot_tasks: "{{ certbot_webhook_raw.results[2].content | b64decode }}"
+
+    - name: "CHECK 16: Assert the webhook secret is never inlined into the script"
+      assert:
+        that:
+          # The secret value lands ONLY in the 0600 env-file, never the script.
+          - "'SENTINEL_DISCORD_WEBHOOK_DO_NOT_INLINE' not in certbot_rendered_script"
+          - "'SENTINEL_DISCORD_WEBHOOK_DO_NOT_INLINE' in certbot_rendered_env"
+          # The script still sources the env-file and uses the value by name.
+          - "'discord_webhook.env' in certbot_rendered_script"
+          - "'DISCORD_WEBHOOK' in certbot_rendered_script"
+          # The env-file is provisioned securely: template + root 0600 + no_log.
+          - "'discord_webhook.env.j2' in certbot_tasks"
+          - "\"mode: '0600'\" in certbot_tasks"
+          - "'no_log: true' in certbot_tasks"
+        fail_msg: >
+          certbot must NOT template the Discord webhook into the world-readable
+          renew-cert.sh (the sentinel secret leaked into the rendered script).
+          The credential must render only into discord_webhook.env (root 0600,
+          template no_log: true); renew-cert.sh must source that file and use
+          $DISCORD_WEBHOOK by name at runtime.
+
+    # ================================================================
     # Cleanup
     # ================================================================
     - name: Clean up rendered test files
@@ -809,3 +876,5 @@
         - /tmp/test-app-ini-rendered
         - /tmp/test-ts-serve-rendered.json
         - /tmp/test-gitea-runner-config.yml
+        - /tmp/test-renew-cert-rendered.sh
+        - /tmp/test-discord-webhook-env-rendered

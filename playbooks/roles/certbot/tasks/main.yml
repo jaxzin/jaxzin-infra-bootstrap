@@ -41,6 +41,20 @@
     owner: root
     group: root
     mode: '0600'
+  no_log: true # embeds the DNSimple OAuth token — keep it out of the logs
+
+# The Discord webhook is a credential: it lives in its own 0600 root env-file,
+# sourced at runtime by renew-cert.sh, and is NEVER templated into that
+# world-readable script. Same secure pattern as gitea_backup's
+# b2_credentials.env / gitea_oidc_reconcile.env.
+- name: Create secure Discord webhook env file
+  template:
+    src: discord_webhook.env.j2
+    dest: "{{ certbot_data_path }}/discord_webhook.env"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true # holds the Discord webhook credential
 
 - name: Template the renew-cert script
   template:
@@ -48,7 +62,9 @@
     dest: "{{ certbot_data_path }}/scripts/renew-cert.sh"
     owner: root
     group: root
-    mode: '0755'
+    # 0750: only root runs this (cron + the initial-acquisition command
+    # below). It holds no credential anymore, so it need not be world-readable.
+    mode: '0750'
 
 - name: Run initial certificate acquisition
   command: "{{ certbot_data_path }}/scripts/renew-cert.sh"
