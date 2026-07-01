@@ -1,0 +1,16 @@
+{
+  "TCP": {
+    "443": {
+      "HTTPS": true
+    }
+  },
+  "Web": {
+    "{{ tailscale_serve_domain }}:443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://{{ tailscale_serve_proxy_host }}:{{ tailscale_serve_proxy_port }}"
+        }
+      }
+    }
+  }
+}

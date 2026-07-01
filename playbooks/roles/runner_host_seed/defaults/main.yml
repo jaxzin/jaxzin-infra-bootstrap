@@ -11,8 +11,20 @@ runner_host_seed_data_path: >-
      | default('/opt/gitea-runner', true) }}
 
 # Tailnet authkey for the host's `tailscale up`. Injected by the deploy
-# (reuses the existing TS_AUTHKEY CI secret). REQUIRED.
+# (reuses the existing TS_AUTHKEY CI secret). REQUIRED only when the host
+# is not already on the tailnet (a join is needed).
 runner_host_seed_tailscale_authkey: ""
+
+# Join the tailnet with MagicDNS DISABLED (--accept-dns=false) by default.
+# Rationale: on a SHARED host (one also running other services, e.g. a
+# sensor/telemetry bridge), accept-dns=true makes tailscaled rewrite
+# /etc/resolv.conf and the host loses resolution of its own LAN names
+# (e.g. *.iot.<lan-domain>), breaking those co-located services. With
+# accept-dns=false the host's resolver is untouched; the runner CONTAINER
+# instead reaches Gitea via an explicit /etc/hosts pin (see the gitea_runner
+# role's gitea_runner_gitea_tailnet_ip). Set true only on a DEDICATED runner
+# host whose tailnet split-DNS already covers its LAN domains.
+runner_host_seed_accept_dns: false
 
 # Docker SDK for Python version (matches the runner image). Override if
 # the runner image's pin changes.

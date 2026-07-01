@@ -99,3 +99,6 @@ tofu/**/*.tfvars
 # Local-only planning artifacts (brainstorming specs / implementation plans).
 # Kept out of this public repo; they reference internal host/network details.
 docs/superpowers/
+
+# Local Claude Code agent state (worktrees, settings) — never commit
+.claude/

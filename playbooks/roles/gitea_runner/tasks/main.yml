@@ -1,16 +1,13 @@
 ---
 # Deploy a Gitea Actions runner as a single socket-mounted container.
-# Host-agnostic. Runs in the CI job container via connection: local
-# (co-located with the bootstrap controller — see
-# docs/runbooks/gitea-runner-host.md), driving the HOST Docker daemon
-# through the bind-mounted socket.
+# Host-agnostic. Applied OVER SSH to the target (gitea-deploy.yml Play 2,
+# hosts: gitea_runner) and drives the target's Docker daemon. Pure
+# consumer: it installs nothing (runner_host_seed provides Docker + tailnet).
 #
-# The runner registration token is NOT minted here. The CI container
-# cannot reach the Gitea admin API (Gitea HTTP is loopback-only on the
-# NAS; the tailnet URL is unresolvable from a non-tailnet container). It
-# is minted in gitea-deploy.yml Play 1 on the NAS (working loopback admin
-# API) and passed in via `gitea_runner_token` (hostvars) — the same
-# cross-play pattern the admin token uses.
+# The runner registration token is NOT minted here — it is minted in
+# gitea-deploy.yml Play 1 on the NAS (working loopback admin API) and passed
+# in via `gitea_runner_token` (hostvars). This role never calls the Gitea
+# API.
 
 - name: Assert the runner registration token was provided by the deploy
   assert:
@@ -43,6 +40,10 @@
   changed_when: false
   failed_when: gitea_runner_ts_status.rc != 0
 
+- name: Derive the Gitea host from the instance URL (for the optional /etc/hosts pin)
+  set_fact:
+    gitea_runner_gitea_host: "{{ gitea_instance_url | regex_replace('^https?://', '') | regex_replace('[:/].*$', '') }}"
+
 - name: Ensure Gitea runner config directory exists
   file:
     path: "{{ gitea_runner_config_file_parent }}"
@@ -61,9 +62,16 @@
 # and for jobs that ssh tailnet hosts) through the HOST's Tailscale, not a
 # sidecar — so plain bridge networking is correct here. Job containers are
 # spawned on the host's Docker daemon via the bind-mounted socket, so they
-# inherit the host's networking and DNS directly. `network_mode: bridge`
-# is explicit (never `container:<sidecar>` — see tests/check_docker_tasks.py
-# Check E and docs/runbooks/gitea-runner-host.md).
+# inherit the host's networking directly. `network_mode: bridge` is explicit
+# (never `container:<sidecar>` — see tests/check_docker_tasks.py Check E and
+# docs/runbooks/gitea-runner-host.md).
+#
+# DNS: when the host runs MagicDNS the container resolves gitea.<tailnet>
+# via the host. On a shared host joined with --accept-dns=false (the
+# safe default — see runner_host_seed_accept_dns) there is no MagicDNS, so
+# we pin gitea_instance_url's host -> Gitea's tailnet IP via etc_hosts when
+# gitea_runner_gitea_tailnet_ip is provided. TLS still validates (hostname
+# is unchanged; Tailscale Serve cert matches).
 - name: Deploy Gitea runner container (socket-mounted)
   community.docker.docker_container:
     name: gitea-runner
@@ -71,6 +79,7 @@
     state: started
     restart_policy: always
     network_mode: bridge
+    etc_hosts: "{{ {gitea_runner_gitea_host: gitea_runner_gitea_tailnet_ip} if (gitea_runner_gitea_tailnet_ip | string | length > 0) else omit }}"
     env:
       CONFIG_FILE: "/data/conf/config.yml"
       GITEA_INSTANCE_URL: "{{ gitea_instance_url }}"

@@ -13,8 +13,14 @@ runner target are **different machines**, connected over SSH.
 
 ## Target-host contract (the only things assumed)
 
-1. Reachable over **SSH** from the controller, with a sudo-capable user
-   (`GITEA_RUNNER_SSH_USER`) and the `GITEA_RUNNER_SSH_KEY` authorized.
+1. Reachable over **SSH** from the controller, with the `GITEA_RUNNER_SSH_KEY`
+   authorized for `GITEA_RUNNER_SSH_USER`, and that user must have
+   **passwordless sudo** (`NOPASSWD`). Play 2 runs `become: true`
+   non-interactively over SSH and supplies **no** sudo password — the Raspberry
+   Pi default `pi` user already has `NOPASSWD: ALL`. (Do NOT wire a become
+   password: feeding one into a NOPASSWD sudo flow makes Ansible fail with
+   "Incorrect sudo password".) Confirm with
+   `sudo -k; sudo -n true && echo PASSWORDLESS-SUDO`.
 2. Reachable **before** it is on the tailnet (the seed joins the tailnet),
    so `GITEA_RUNNER_HOST` must be LAN-resolvable at seed time.
 3. A systemd Linux host where Docker can be installed.
@@ -22,10 +28,34 @@ runner target are **different machines**, connected over SSH.
 Everything else is provided by the deploy:
 
 - **`runner_host_seed` role** installs Docker + the Docker SDK for Python,
-  joins the tailnet via the `TS_AUTHKEY` secret, and creates the data dir.
+  joins the tailnet via the `TS_AUTHKEY` secret (with **`--accept-dns=false`**
+  by default — see "Shared-host DNS" below), and creates the data dir. The
+  authkey is only required when the host is not already on the tailnet.
 - **`gitea_runner` role** is a pure consumer: it asserts Docker + tailnet
   are present (fails fast otherwise), then deploys + registers the
   socket-mounted act_runner container with an arch-derived label.
+
+## Shared-host DNS (why `--accept-dns=false`)
+
+The runner host may be **shared** with other services (e.g. a host that also
+runs a sensor/weather bridge resolving LAN names like `*.iot.<lan-domain>`).
+If Tailscale joins with `--accept-dns=true`, `tailscaled` **rewrites the
+host's `/etc/resolv.conf`** to MagicDNS and the host can lose resolution of
+its own LAN names — breaking those co-located services.
+
+So `runner_host_seed` joins with **`--accept-dns=false`** (var
+`runner_host_seed_accept_dns`, default `false`), leaving the host resolver
+untouched. The runner **container** then can't use MagicDNS to find
+`gitea.<tailnet>`, so the deploy **pins it**: Play 1 captures Gitea's tailnet
+IP (`tailscale ip -4` on the Gitea sidecar) and passes it as
+`gitea_runner_gitea_tailnet_ip`; the `gitea_runner` role adds a
+`gitea.<tailnet> -> <ip>` entry to the act_runner container's `/etc/hosts`.
+TLS still validates because the connection uses the hostname (Tailscale Serve
+cert matches).
+
+Set `runner_host_seed_accept_dns: true` only on a **dedicated** runner host
+whose tailnet split-DNS already covers its LAN domains (then the pin is
+unnecessary, though harmless).
 
 ## SSH access (one-time seed, IaC)
 

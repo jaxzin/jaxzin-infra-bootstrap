@@ -16,7 +16,8 @@ unreachable` to a tailnet host that is independently verified healthy.
 `jaxzin-infra-bootstrap` runs **persistent** Tailscale sidecars
 (`tailscale-gitea`, `tailscale-runner`; `restart_policy: always`). They
 authenticate with a single key from the `TS_AUTHKEY` CI secret
-(`playbooks/vars/main.yml` → `tailscale_sidecar` role env).
+(`playbooks/vars/main.yml`, passed to the `jaxzin.infra.tailscale_sidecar`
+collection role).
 
 **Persistent nodes must use a reusable, NON-ephemeral auth key.** An
 ephemeral key deauthorizes and removes its node as soon as the node goes
@@ -53,7 +54,7 @@ Never commit the key. It lives only in the CI secret store.
      via the Gitea UI (Settings → Actions → Secrets) or API.
 3. Trigger a deploy (`Bootstrap` workflow on GitHub, or the Gitea
    `Deploy Gitea` workflow). The fail-fast assertions in the
-   `tailscale_sidecar` role will now pass instead of erroring; if they
+   `jaxzin.infra.tailscale_sidecar` collection role will now pass instead of erroring; if they
    still error, the new key's type/tags are wrong — re-check
    "Correct key type".
 4. Revoke the old key in the admin console once the deploy is green.
@@ -68,8 +69,8 @@ Never commit the key. It lives only in the CI secret store.
 
 ## Lifecycle (so this can't silently recur)
 
-- The `tailscale_sidecar` role assertions convert a dead key into an
-  immediate, named deploy failure — it can no longer fail silently four
+- The `jaxzin.infra.tailscale_sidecar` collection role's assertions convert a
+  dead key into an immediate, named deploy failure — it can no longer fail silently four
   plays downstream.
 - Record the key's expiration and rotate ahead of it.
 - If the tailnet policy supports it, prefer an OAuth client / tagged key

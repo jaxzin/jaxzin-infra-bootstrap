@@ -3,15 +3,6 @@
 # become. Idempotent. The gitea_runner role ASSERTS what this PROVIDES.
 # See docs/runbooks/gitea-runner-host.md.
 
-- name: Assert a tailnet authkey was provided
-  assert:
-    that:
-      - runner_host_seed_tailscale_authkey | string | length > 0
-    fail_msg: >-
-      runner_host_seed_tailscale_authkey is empty. Pass the TS_AUTHKEY CI
-      secret so this host can join the tailnet (the runner CONTAINER needs
-      tailnet egress to reach Gitea). See docs/runbooks/gitea-runner-host.md.
-
 - name: Ensure Docker Engine is installed (get.docker.com)
   ansible.builtin.shell: |
     set -eu
@@ -70,11 +61,27 @@
   changed_when: false
   failed_when: false
 
+- name: Assert a tailnet authkey was provided (only when a join is needed)
+  # Not required on a host already on the tailnet (idempotent re-runs and
+  # hosts joined out-of-band, e.g. an interactive `tailscale up`).
+  assert:
+    that:
+      - runner_host_seed_tailscale_authkey | string | length > 0
+    fail_msg: >-
+      Host is not on the tailnet and runner_host_seed_tailscale_authkey is
+      empty. Pass the TS_AUTHKEY CI secret so this host can join (the runner
+      CONTAINER needs tailnet egress to reach Gitea). See
+      docs/runbooks/gitea-runner-host.md.
+  when: ts_status.rc != 0
+
 - name: Join the tailnet (only when not already up)
-  # Kernel mode, no --ssh. Gated on status so re-runs are true no-ops and
-  # the play output reflects a real join only when one happens.
+  # Kernel mode, no --ssh. --accept-dns is DISABLED by default so tailscaled
+  # does not rewrite the host's /etc/resolv.conf (protects a shared host's
+  # own LAN name resolution — see runner_host_seed_accept_dns). Gated on
+  # status so re-runs are true no-ops and the play output reflects a real
+  # join only when one happens.
   ansible.builtin.command:
-    cmd: "tailscale up --authkey {{ runner_host_seed_tailscale_authkey }}"
+    cmd: "tailscale up --authkey {{ runner_host_seed_tailscale_authkey }} --accept-dns={{ runner_host_seed_accept_dns | string | lower }}"
   when: ts_status.rc != 0
   no_log: true
 
