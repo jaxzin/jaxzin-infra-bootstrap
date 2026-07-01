@@ -288,18 +288,22 @@
           - "'ansible_ssh_private_key_file' in common_bootstrap"
           - "'ansible_connection=local' not in common_bootstrap"
           - "'connection: local' not in gitea_deploy"
-          # Play 2 (gitea_runner) runs become:true over SSH; the runner user
-          # must have PASSWORDLESS sudo (NOPASSWD), so the inventory carries no
-          # become password — feeding one into a NOPASSWD sudo flow makes
-          # Ansible fail with "Incorrect sudo password". Lock that the runner
-          # line does not (re)introduce a become password.
-          - "'GITEA_RUNNER_SUDO_PASSWORD' not in common_bootstrap"
+          # Play 2 (gitea_runner) runs become:true over SSH. The live runner
+          # host lacks working passwordless (NOPASSWD) sudo despite the PR #135
+          # SD-image bake — Play 2 failed "Missing sudo password" until #143
+          # wired in the GITEA_RUNNER_SUDO_PASSWORD secret. Lock that the runner
+          # line carries that become password so Play 2 can escalate.
+          # FOLLOW-UP: if the host is reimaged with working NOPASSWD, flip this
+          # back to a "not in" lock, drop the password, and the runbook's
+          # NOPASSWD prereq (asserted below) becomes the enforced reality again.
+          - "'GITEA_RUNNER_SUDO_PASSWORD' in common_bootstrap"
         fail_msg: >
           The opportunistic SSH wiring regressed: common-bootstrap.yml must
           install GITEA_RUNNER_SSH_KEY and set ansible_ssh_private_key_file
-          for [gitea_runner] (NOT ansible_connection=local), must NOT set a
-          become password for the runner (it relies on passwordless sudo), and
-          gitea-deploy.yml Play 2 must NOT be connection: local.
+          for [gitea_runner] (NOT ansible_connection=local), must set the
+          GITEA_RUNNER_SUDO_PASSWORD become password (the live runner lacks
+          working NOPASSWD sudo — see #143), and gitea-deploy.yml Play 2 must
+          NOT be connection: local.
 
     - name: "CHECK 8: Assert the host is seeded before the runner is deployed"
       assert:
