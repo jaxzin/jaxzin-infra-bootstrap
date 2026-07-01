@@ -60,6 +60,16 @@
   # for the webhook, then execs the reconcile script — so the cron line stays
   # secret-free.
 
+- name: Ensure the stack-reconcile watchdog image is present
+  # docker_container cannot create a NOT-YET-EXISTING container in --check mode
+  # when the image is absent locally ("Cannot create container when image is
+  # not specified!"). Pull the image explicitly, and run it even in check mode
+  # (check_mode: false) so a dry-run can still validate the container task.
+  # Pulling an image is non-disruptive — it does not touch running containers.
+  community.docker.docker_image_pull:
+    name: "{{ stack_reconcile_image }}"
+  check_mode: false
+
 - name: Deploy stack-reconcile watchdog container
   community.docker.docker_container:
     name: "{{ stack_reconcile_container_name }}"
