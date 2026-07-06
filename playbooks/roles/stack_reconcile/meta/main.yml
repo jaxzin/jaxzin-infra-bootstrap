@@ -135,6 +135,19 @@ argument_specs:
         description: >-
           The gate's dependency that must be healthy first. Default in
           defaults/main.yml.
+      stack_reconcile_netns_parent:
+        type: "str"
+        description: >-
+          Container providing the shared network namespace (the tailscale
+          sidecar). When it restarts, the netns child is stranded in the dead
+          namespace (#148); reconcile restarts the child once the parent is
+          stable. Default in defaults/main.yml.
+      stack_reconcile_netns_child:
+        type: "str"
+        description: >-
+          Container running with network_mode: container:<netns_parent>.
+          Restarted when its StartedAt predates a stable, healthy parent's.
+          Default in defaults/main.yml.
       stack_reconcile_interval_seconds:
         type: "int"
         description: >-

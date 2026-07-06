@@ -35,6 +35,21 @@
       changed_when: false
 
     # ================================================================
+    # Check 1b: reconcile script behavioral self-test
+    # ================================================================
+    # Renders stack_reconcile.sh.j2 and exercises every reconcile case
+    # against a stubbed docker/date/wget (no daemon, no network): lock
+    # stand-down, debounce, dependency gate, ENSURE self-revive, Discord
+    # alert, and the #148 netns reconcile (stranded-child restart + its
+    # parent-health / stability / idempotency guards). check_docker_tasks
+    # CHECK M locks the netns env PLUMBING; this locks the BEHAVIOR.
+    - name: "CHECK 1b: Run the stack_reconcile behavioral self-test"
+      command: bash {{ project_root }}/tests/reconcile_selftest.sh
+      args:
+        chdir: "{{ project_root }}"
+      changed_when: false
+
+    # ================================================================
     # Check 2: No hardcoded /volume1/ paths in roles (Gap 3)
     # ================================================================
     - name: "CHECK 2: Scan role tasks for hardcoded /volume1/ paths"

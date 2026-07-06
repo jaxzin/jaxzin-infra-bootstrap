@@ -34,6 +34,14 @@ Checks:
      docker live-restore is on, AND the two lock-path defaults (one in
      stack_reconcile, one in gitea_backup) reduce to the SAME path — a
      single source of truth that a one-sided edit must not be able to split.
+  M) the netns reconcile (#148) is plumbed END-TO-END: the reconcile script
+     implements the stranded-namespace step (RECONCILE_NETNS_PARENT/CHILD +
+     a .State.StartedAt comparison), and BOTH drivers deliver the env — the
+     watchdog container's env: block and the cron wrapper (set + export).
+     A sidecar restart strands gitea in a dead netns while everything
+     reports healthy; only this step catches it, and env lost in either
+     driver disables it silently. (Behavior is locked separately by
+     tests/reconcile_selftest.sh cases l-p.)
 
 Uses only Python stdlib — no PyYAML required.
 """
@@ -99,6 +107,10 @@ STACK_RECONCILE_CONTAINER_NAME = "stack-reconcile"
 # The host docker socket the watchdog talks to. Without this bind-mount the
 # watchdog cannot reach the daemon to revive orphaned containers.
 STACK_RECONCILE_SOCKET_MOUNT = "/var/run/docker.sock:/var/run/docker.sock"
+
+STACK_RECONCILE_CRON_WRAPPER = (
+    f"{ROLES_DIR}/stack_reconcile/templates/stack_reconcile_cron.sh.j2"
+)
 
 # The reconcile script filename — the watchdog command/volumes must reference
 # it (it is mounted in and run on every loop).
@@ -737,6 +749,92 @@ def check_l_reconcile_safety(errors):
             )
 
 
+def check_m_netns_reconcile(errors):
+    """Check M: the netns reconcile (#148) is plumbed end-to-end.
+
+    2026-07-05 incident: autoheal restarted the tailscale-gitea sidecar,
+    which created a NEW network namespace — but gitea (network_mode:
+    container:tailscale-gitea) stayed pinned in the OLD one. tailscale serve
+    dialed 127.0.0.1:3000 in the new netns and got connection refused (502)
+    for ~3.5h while every container, gitea included, reported healthy (its
+    healthcheck runs inside the stranded netns, where localhost answers).
+    restart=always, autoheal, and reconcile steps 1-3 (check K/L) all miss
+    this state; only the StartedAt-comparison step catches it.
+
+    The step is only alive if THREE places agree, and losing any one of them
+    disables it silently (the script defaults NETNS_* to empty and skips):
+      1. the reconcile script implements it (env consumed + StartedAt read);
+      2. the watchdog container passes RECONCILE_NETNS_PARENT/CHILD in env:;
+      3. the cron wrapper sets AND exports both (a set without export never
+         reaches the script's environment).
+    Script BEHAVIOR (guards, idempotency) is locked by
+    tests/reconcile_selftest.sh cases l-p; this check locks the plumbing.
+    """
+    # --- 1. script implements the netns step -------------------------------
+    try:
+        with open(STACK_RECONCILE_SCRIPT) as fh:
+            script = fh.read()
+    except FileNotFoundError:
+        errors.append(f"{STACK_RECONCILE_SCRIPT}: File not found")
+        script = ""
+    if script:
+        for needle, why in (
+            ("RECONCILE_NETNS_PARENT", "consume the netns parent env var"),
+            ("RECONCILE_NETNS_CHILD", "consume the netns child env var"),
+            (".State.StartedAt", "compare container start times — the only "
+                                 "signal that distinguishes a stranded child "
+                                 "from a healthy one"),
+        ):
+            if needle not in script:
+                errors.append(
+                    f"{STACK_RECONCILE_SCRIPT}: missing '{needle}' — the netns "
+                    f"reconcile step must {why}; without it a sidecar restart "
+                    f"strands gitea in a dead netns (502 with everything "
+                    f"'healthy', issue #148) and nothing self-heals."
+                )
+
+    # --- 2. watchdog container delivers the env ----------------------------
+    try:
+        with open(STACK_RECONCILE_TASKS) as fh:
+            tasks = fh.read()
+    except FileNotFoundError:
+        errors.append(f"{STACK_RECONCILE_TASKS}: File not found")
+        tasks = ""
+    if tasks:
+        for var in ("RECONCILE_NETNS_PARENT", "RECONCILE_NETNS_CHILD"):
+            if var not in tasks:
+                errors.append(
+                    f"{STACK_RECONCILE_TASKS}: watchdog container env: does not "
+                    f"pass {var}; the script defaults it to empty and silently "
+                    f"skips the netns reconcile (#148) in the fast ~30s driver."
+                )
+
+    # --- 3. cron wrapper sets AND exports the env --------------------------
+    try:
+        with open(STACK_RECONCILE_CRON_WRAPPER) as fh:
+            cron = fh.read()
+    except FileNotFoundError:
+        errors.append(f"{STACK_RECONCILE_CRON_WRAPPER}: File not found")
+        cron = ""
+    if cron:
+        for var in ("RECONCILE_NETNS_PARENT", "RECONCILE_NETNS_CHILD"):
+            if not re.search(rf'^{var}=', cron, re.MULTILINE):
+                errors.append(
+                    f"{STACK_RECONCILE_CRON_WRAPPER}: does not set {var}; the "
+                    f"host-cron fallback driver would silently skip the netns "
+                    f"reconcile (#148)."
+                )
+            elif not re.search(
+                rf'^export\b[^\n]*(\\\n[^\n]*)*\b{var}\b', cron, re.MULTILINE
+            ):
+                errors.append(
+                    f"{STACK_RECONCILE_CRON_WRAPPER}: sets {var} but never "
+                    f"exports it — a set without export never reaches the "
+                    f"reconcile script's environment, so the netns step is "
+                    f"disabled in the cron driver."
+                )
+
+
 def main():
     errors = []
     warnings = []
@@ -779,6 +877,10 @@ def main():
     # Run check L: the reconcile safety contract is intact (lock stand-down,
     # trap-released backup lock, live-restore, and lock-path single-source)
     check_l_reconcile_safety(errors)
+
+    # Run check M: the netns reconcile (#148) is plumbed end-to-end
+    # (script step + watchdog env + cron wrapper set/export)
+    check_m_netns_reconcile(errors)
 
     # Report results
     for w in warnings:

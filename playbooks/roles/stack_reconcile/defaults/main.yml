@@ -66,6 +66,14 @@ stack_reconcile_containers: "tailscale-gitea gitea-db gitea"
 stack_reconcile_gate: "gitea"
 stack_reconcile_gate_depends_on: "gitea-db"
 
+# netns reconcile (#148): gitea shares the sidecar's network namespace
+# (network_mode: container:tailscale-gitea). A sidecar restart creates a NEW
+# netns while gitea stays pinned in the OLD one — dead to the world (502) yet
+# reporting healthy. When the child's StartedAt predates a stable, healthy
+# parent's, reconcile restarts the child so it rejoins the live netns.
+stack_reconcile_netns_parent: "tailscale-gitea"
+stack_reconcile_netns_child: "gitea"
+
 stack_reconcile_interval_seconds: 30        # watchdog container loop cadence
 stack_reconcile_debounce_seconds: 90        # ignore stops younger than this
 stack_reconcile_log_max_bytes: 1048576      # trim RECONCILE_LOG past 1 MiB

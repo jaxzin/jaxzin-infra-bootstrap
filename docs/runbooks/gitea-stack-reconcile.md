@@ -88,6 +88,23 @@ Each pass does, in order:
    a missing DB. It keys on `unhealthy` specifically (not merely "not healthy")
    so a container still in its healthcheck `start_period` is left alone — a
    restart there would reset `start_period` and thrash `gitea` every loop.
+5. **Netns reconcile (the 2026-07-05 stranded-namespace incident, #148).**
+   `gitea` shares the sidecar's network namespace
+   (`network_mode: container:tailscale-gitea`). When the sidecar **restarts**
+   (e.g. autoheal acting on a failed healthcheck), Docker creates a **new**
+   namespace for it, but gitea's process stays pinned in the **old** one:
+   `tailscale serve → 127.0.0.1:3000` gets connection refused (external 502)
+   while gitea reports **healthy** forever — its healthcheck runs inside the
+   stranded namespace, where localhost still answers. Nothing else can catch
+   this (both containers are running + healthy by every Docker signal), so the
+   reconcile compares start times: if the child (`stack_reconcile_netns_child`,
+   `gitea`) **started before** the parent (`stack_reconcile_netns_parent`,
+   `tailscale-gitea`), the child is restarted so it rejoins the live namespace.
+   Guards: both running; parent healthy (or has no healthcheck); parent up at
+   least the debounce window, so a flapping sidecar (the 2026-07-05 autoheal
+   restart-loop) gets time to prove stable before the child commits to its
+   namespace. The restart makes the child newer than the parent, so the step is
+   naturally idempotent — one restart per parent restart, never a loop.
 
 The script always exits 0 (best-effort; a reconcile error must never cascade
 into the DR-first Gitea stack). Corrective actions (`docker start` / `docker
@@ -214,6 +231,19 @@ on the NAS:
 If the tailscale sidecar is also down, start it first
 (`/usr/local/bin/docker start tailscale-gitea`) so `gitea` has its network
 namespace, then proceed as above.
+
+**Stranded-namespace variant (external 502 while every container shows
+`Up (healthy)`):** the sidecar was restarted after gitea joined its namespace,
+so gitea is serving into a dead netns. Confirm with
+`/usr/local/bin/docker exec tailscale-gitea wget -q -O- http://127.0.0.1:3000/`
+(connection refused = stranded), wait for `tailscale-gitea` to be stable and
+healthy, then:
+
+```sh
+/usr/local/bin/docker restart gitea
+```
+
+Reconcile's netns step (step 5 above) automates exactly this.
 
 ## Related
 
