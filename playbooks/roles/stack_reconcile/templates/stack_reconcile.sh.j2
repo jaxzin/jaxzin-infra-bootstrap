@@ -16,6 +16,8 @@ GATE_DEP="${RECONCILE_GATE_DEPENDS_ON:-}"
 LOCK="${RECONCILE_LOCK:?set RECONCILE_LOCK}"
 DEBOUNCE="${RECONCILE_DEBOUNCE:-90}"
 ENSURE="${RECONCILE_ENSURE_CONTAINER:-}"
+NETNS_PARENT="${RECONCILE_NETNS_PARENT:-}"
+NETNS_CHILD="${RECONCILE_NETNS_CHILD:-}"
 LOG="${RECONCILE_LOG:-/dev/stderr}"
 HOOK="${RECONCILE_DISCORD_WEBHOOK:-}"
 DRYRUN="${RECONCILE_DRYRUN:-0}"
@@ -50,6 +52,17 @@ finished_epoch() {
   # GNU date (Synology host cron) accepts -d <rfc3339> directly.
   date -u -d "$d" +%s 2>/dev/null && return
   # busybox date (Alpine watchdog) needs an explicit input format via -D.
+  date -u -D '%Y-%m-%dT%H:%M:%SZ' -d "$d" +%s 2>/dev/null && return
+  echo ""
+}
+
+# epoch of a docker StartedAt RFC3339Nano string; empty on parse failure.
+# Same dual GNU/busybox `date` dance as finished_epoch above.
+started_epoch() {
+  sa="$(inspect '{{ "{{.State.StartedAt}}" }}' "$1")"
+  case "$sa" in ''|0001-01-01*) echo ""; return;; esac
+  d="$(printf '%s' "$sa" | sed 's/\.[0-9]*Z$/Z/')"
+  date -u -d "$d" +%s 2>/dev/null && return
   date -u -D '%Y-%m-%dT%H:%M:%SZ' -d "$d" +%s 2>/dev/null && return
   echo ""
 }
@@ -127,6 +140,46 @@ if [ -n "$GATE" ] && [ -n "$GATE_DEP" ]; then
     if [ "$DRYRUN" = "1" ]; then log "DRYRUN would restart gate '$GATE'";
     elif $DOCKER restart "$GATE" >/dev/null 2>&1; then alert "restarted '$GATE' (dep '$GATE_DEP' healthy, gate was '$gate_h')";
     else log "FAILED to restart gate '$GATE'"; fi
+  fi
+fi
+
+# --- 4. netns reconcile: a parent restart strands netns-sharing children ----
+# gitea runs with network_mode: container:tailscale-gitea. A restart of the
+# sidecar creates a NEW network namespace, but gitea's process stays pinned in
+# the OLD one — tailscale serve dials 127.0.0.1:3000 in the new netns and gets
+# connection refused (502) while gitea reports HEALTHY forever (its healthcheck
+# runs inside the stranded netns, where localhost still answers). See #148.
+# Remedy: when the child STARTED BEFORE the parent, restart the child so it
+# rejoins the parent's current netns. Guards, in order:
+#   * both running (step 2 above revives stopped ones first);
+#   * parent healthy — or has no healthcheck at all (empty Health). While the
+#     parent is flapping/unhealthy (the 2026-07-05 autoheal loop), restarting
+#     the child would just thrash it into another doomed netns;
+#   * parent up >= DEBOUNCE, so a mid-flap parent gets time to prove stable;
+#   * child StartedAt < parent StartedAt — restart makes child newer, so this
+#     is naturally idempotent (one restart per parent restart, no loop).
+if [ -n "$NETNS_PARENT" ] && [ -n "$NETNS_CHILD" ]; then
+  p_st="$(inspect '{{ "{{.State.Status}}" }}' "$NETNS_PARENT")"
+  c_st="$(inspect '{{ "{{.State.Status}}" }}' "$NETNS_CHILD")"
+  if [ "$p_st" = "running" ] && [ "$c_st" = "running" ]; then
+    p_h="$(inspect '{{ "{{if .State.Health}}{{.State.Health.Status}}{{end}}" }}' "$NETNS_PARENT")"
+    if [ -z "$p_h" ] || [ "$p_h" = "healthy" ]; then
+      p_up="$(started_epoch "$NETNS_PARENT")"
+      c_up="$(started_epoch "$NETNS_CHILD")"
+      if [ -z "$p_up" ] || [ -z "$c_up" ]; then
+        # Unlike the step-2 age-unknown branch (where an orphan left dead is
+        # worse than a start), a restart here is NOT safe to guess: without
+        # both timestamps we cannot tell stranded from fine, and restarting a
+        # fine child is an outage. Skip and log.
+        log "netns: StartedAt unknown for '$NETNS_PARENT' or '$NETNS_CHILD' — skipping"
+      elif [ $(( now - p_up )) -lt "$DEBOUNCE" ]; then
+        log "netns: parent '$NETNS_PARENT' up $(( now - p_up ))s < debounce ${DEBOUNCE}s — wait"
+      elif [ "$c_up" -lt "$p_up" ]; then
+        if [ "$DRYRUN" = "1" ]; then log "DRYRUN would restart netns child '$NETNS_CHILD'";
+        elif $DOCKER restart "$NETNS_CHILD" >/dev/null 2>&1; then alert "restarted '$NETNS_CHILD' (stranded in dead netns: parent '$NETNS_PARENT' restarted after it)";
+        else log "FAILED to restart netns child '$NETNS_CHILD'"; fi
+      fi
+    fi
   fi
 fi
 exit 0

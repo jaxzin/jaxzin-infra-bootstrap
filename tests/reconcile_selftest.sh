@@ -21,6 +21,12 @@
 #   policy != always (exited+aged)        -> NO start (restart-policy load-bearing)
 #   (j) ENSURE self-revive                -> start stack-reconcile
 #   (k) Discord alert                     -> wget stub records a POST
+#   (l) netns child stranded (started before a stable healthy parent)
+#                                         -> restart gitea (exact) + alert
+#   (m) netns child newer than parent     -> NO restart (already rejoined)
+#   (n) netns parent unhealthy            -> NO restart (parent-health load-bearing)
+#   (o) netns parent younger than debounce -> NO restart (stability gate)
+#   (p) netns parent w/o healthcheck      -> restart still happens (health optional)
 #
 # The fake `docker` answers `inspect -f <fmt> <name>` from a per-case state
 # table and records `start`/`restart` invocations to a marker file, so each
@@ -74,6 +80,7 @@ case "$verb" in
       *".State.Status"*)                  field="status" ;;
       *".HostConfig.RestartPolicy.Name"*) field="policy" ;;
       *".State.FinishedAt"*)              field="finished" ;;
+      *".State.StartedAt"*)               field="started" ;;
       *".State.Health"*)                  field="health" ;;
       *)                                   field="unknown" ;;
     esac
@@ -174,7 +181,7 @@ reset_state() {
   # external command), so without this an earlier case's RC_LOCK/RC_GATE would
   # silently leak into later cases. Reset them every case to stay isolated.
   RC_CONTAINERS=""; RC_GATE=""; RC_GATE_DEP=""; RC_LOCK=""; RC_DEBOUNCE=""
-  RC_ENSURE=""; RC_HOOK=""
+  RC_ENSURE=""; RC_HOOK=""; RC_NETNS_PARENT=""; RC_NETNS_CHILD=""
   # Same prefix-leak caveat: DATE_FORCE_BUSYBOX set as a prefix on the
   # run_reconcile function call stays in this shell, so clear it each case.
   DATE_FORCE_BUSYBOX=0
@@ -193,6 +200,14 @@ set_container() {
   # health field mirrors the go-template `{{if .State.Health}}...{{end}}`:
   # empty string when the container has no healthcheck.
   printf '%s' "$health" > "$STATE_DIR/$name.health"
+}
+
+# set_started <name> <rfc3339> — the container's .State.StartedAt. Separate
+# from set_container so the pre-netns cases don't have to grow a 6th
+# positional arg; cases that don't call it leave .started missing, which the
+# stub answers with rc=1/empty (StartedAt unknown -> netns step must skip).
+set_started() {
+  printf '%s' "$2" > "$STATE_DIR/$1.started"
 }
 
 # An RFC3339Nano timestamp `age` seconds in the past, WITH a fractional
@@ -222,6 +237,8 @@ run_reconcile() {
   RECONCILE_ENSURE_CONTAINER="${RC_ENSURE:-}" \
   RECONCILE_LOG="$WORK/reconcile.log" \
   RECONCILE_DISCORD_WEBHOOK="${RC_HOOK:-}" \
+  RECONCILE_NETNS_PARENT="${RC_NETNS_PARENT:-}" \
+  RECONCILE_NETNS_CHILD="${RC_NETNS_CHILD:-}" \
   DATE_FORCE_BUSYBOX="${DATE_FORCE_BUSYBOX:-0}" \
   DOCKER_BIN="docker" \
   sh "$SCRIPT"
@@ -384,6 +401,83 @@ check "(k) Discord alert -> wget POST recorded" \
   "$(wget_posted '[stack_reconcile]')"
 check "(k) Discord alert -> action still taken (start gitea-db)" \
   "$(actions_contain 'start gitea-db')"
+
+# --- (l) netns child stranded -> restart child (exact) + alert -------------
+# Root cause of #148: gitea shares the sidecar's netns via network_mode:
+# container:. A sidecar restart creates a NEW netns while gitea's process stays
+# pinned in the OLD one — gitea keeps reporting healthy (its healthcheck runs
+# in the stranded netns) so nothing else ever fixes it. The reconcile must
+# restart the child when it STARTED BEFORE a stable, healthy parent.
+reset_state
+set_container tailscale-gitea running always "-" healthy
+set_started   tailscale-gitea "$(ago 600)"     # parent up 600s > debounce 90s
+set_container gitea-db        running always "-" healthy
+set_container gitea           running always "-" healthy
+set_started   gitea           "$(ago 9000)"    # child predates parent restart
+RC_CONTAINERS="tailscale-gitea gitea-db gitea" \
+RC_NETNS_PARENT="tailscale-gitea" RC_NETNS_CHILD="gitea" \
+RC_HOOK="http://discord.invalid/webhook" RC_DEBOUNCE=90 run_reconcile
+check "(l) netns stranded child -> exactly 'restart gitea'" \
+  "$(actions_exact 'restart gitea')"
+check "(l) netns stranded child -> Discord alert posted" \
+  "$(wget_posted '[stack_reconcile]')"
+
+# --- (m) netns child newer than parent -> NO restart ------------------------
+reset_state
+# Child was (re)started AFTER the parent — it lives in the parent's current
+# netns. Restarting it again every loop would be a thrash loop; must no-op.
+set_container tailscale-gitea running always "-" healthy
+set_started   tailscale-gitea "$(ago 600)"
+set_container gitea-db        running always "-" healthy
+set_container gitea           running always "-" healthy
+set_started   gitea           "$(ago 300)"     # child newer than parent
+RC_CONTAINERS="tailscale-gitea gitea-db gitea" \
+RC_NETNS_PARENT="tailscale-gitea" RC_NETNS_CHILD="gitea" run_reconcile
+check "(m) netns child newer than parent -> NO restart" "$(actions_empty)"
+
+# --- (n) netns parent unhealthy -> NO restart --------------------------------
+reset_state
+# The 2026-07-05 incident: autoheal restart-looped the sidecar for 3h. While
+# the parent is flapping/unhealthy, restarting the child would just thrash it
+# into another doomed netns. The parent-health guard is load-bearing: a mutant
+# ignoring it would restart gitea here and FAIL.
+set_container tailscale-gitea running always "-" unhealthy
+set_started   tailscale-gitea "$(ago 600)"
+set_container gitea-db        running always "-" healthy
+set_container gitea           running always "-" healthy
+set_started   gitea           "$(ago 9000)"
+RC_CONTAINERS="tailscale-gitea gitea-db gitea" \
+RC_NETNS_PARENT="tailscale-gitea" RC_NETNS_CHILD="gitea" run_reconcile
+check "(n) netns parent unhealthy -> NO restart" "$(actions_empty)"
+
+# --- (o) netns parent younger than debounce -> NO restart --------------------
+reset_state
+# Parent restarted moments ago (possibly mid-flap). Wait for it to prove
+# stable (up >= debounce) before committing the child to its netns.
+set_container tailscale-gitea running always "-" healthy
+set_started   tailscale-gitea "$(ago 10)"      # 10s < debounce 90s
+set_container gitea-db        running always "-" healthy
+set_container gitea           running always "-" healthy
+set_started   gitea           "$(ago 9000)"
+RC_CONTAINERS="tailscale-gitea gitea-db gitea" \
+RC_NETNS_PARENT="tailscale-gitea" RC_NETNS_CHILD="gitea" \
+RC_DEBOUNCE=90 run_reconcile
+check "(o) netns parent younger than debounce -> NO restart" "$(actions_empty)"
+
+# --- (p) netns parent without healthcheck -> restart still happens -----------
+reset_state
+# A parent with NO healthcheck (empty .State.Health) must not disable the
+# netns reconcile — health is an extra guard when present, not a requirement.
+set_container tailscale-gitea running always "-" ""
+set_started   tailscale-gitea "$(ago 600)"
+set_container gitea-db        running always "-" healthy
+set_container gitea           running always "-" healthy
+set_started   gitea           "$(ago 9000)"
+RC_CONTAINERS="tailscale-gitea gitea-db gitea" \
+RC_NETNS_PARENT="tailscale-gitea" RC_NETNS_CHILD="gitea" \
+RC_DEBOUNCE=90 run_reconcile
+check "(p) netns parent w/o healthcheck -> exactly 'restart gitea'" \
+  "$(actions_exact 'restart gitea')"
 
 # --- summary ---------------------------------------------------------------
 TOTAL=$(( PASS + FAIL ))

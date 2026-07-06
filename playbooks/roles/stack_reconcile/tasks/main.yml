@@ -92,6 +92,8 @@
       RECONCILE_CONTAINERS: "{{ stack_reconcile_containers }}"
       RECONCILE_GATE: "{{ stack_reconcile_gate }}"
       RECONCILE_GATE_DEPENDS_ON: "{{ stack_reconcile_gate_depends_on }}"
+      RECONCILE_NETNS_PARENT: "{{ stack_reconcile_netns_parent }}"
+      RECONCILE_NETNS_CHILD: "{{ stack_reconcile_netns_child }}"
       RECONCILE_LOCK: "{{ stack_reconcile_lock_path }}"
       RECONCILE_DEBOUNCE: "{{ stack_reconcile_debounce_seconds | string }}"
       RECONCILE_LOG: "{{ stack_reconcile_log_path }}"
