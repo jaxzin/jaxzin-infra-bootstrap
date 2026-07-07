@@ -14,13 +14,23 @@ runner target are **different machines**, connected over SSH.
 ## Target-host contract (the only things assumed)
 
 1. Reachable over **SSH** from the controller, with the `GITEA_RUNNER_SSH_KEY`
-   authorized for `GITEA_RUNNER_SSH_USER`, and that user must have
-   **passwordless sudo** (`NOPASSWD`). Play 2 runs `become: true`
-   non-interactively over SSH and supplies **no** sudo password — the Raspberry
-   Pi default `pi` user already has `NOPASSWD: ALL`. (Do NOT wire a become
-   password: feeding one into a NOPASSWD sudo flow makes Ansible fail with
-   "Incorrect sudo password".) Confirm with
-   `sudo -k; sudo -n true && echo PASSWORDLESS-SUDO`.
+   authorized for `GITEA_RUNNER_SSH_USER`, and that user must be
+   **sudo-capable with a password**. Play 2 runs `become: true` and supplies
+   `ansible_become_password` from the `GITEA_RUNNER_SUDO_PASSWORD` secret on
+   the inventory line (see `common-bootstrap.yml`).
+
+   > **This is a deliberate posture decision** (PR #135 closed in favor of
+   > #138, re-landed as #143): SSH key **and** sudo password = defense in
+   > depth. Do NOT "fix" a Play 2 sudo failure by switching the host to
+   > `NOPASSWD` or by removing the become-password wiring — that exact
+   > flip-flop already happened once (#139 reverted #138 based on an earlier
+   > revision of this section, and had to be re-fixed by #143). Decode the
+   > two failures instead:
+   >   * `Missing sudo password` — the `ansible_become_password` wiring is
+   >     absent from the inventory line (regression of #143).
+   >   * `Incorrect sudo password` — the `GITEA_RUNNER_SUDO_PASSWORD`
+   >     secret's value does not match the target user's actual password;
+   >     update the secret (`gh secret set GITEA_RUNNER_SUDO_PASSWORD`).
 2. Reachable **before** it is on the tailnet (the seed joins the tailnet),
    so `GITEA_RUNNER_HOST` must be LAN-resolvable at seed time.
 3. A systemd Linux host where Docker can be installed.
@@ -78,6 +88,7 @@ install the key over the key it installs).
 | `GITEA_RUNNER_HOST` | Secret | The target host (LAN-resolvable for pre-tailnet seeding). |
 | `GITEA_RUNNER_SSH_USER` | Variable | Sudo-capable SSH user on the target. |
 | `GITEA_RUNNER_SSH_KEY` | Secret | Private key authorized on the target. |
+| `GITEA_RUNNER_SUDO_PASSWORD` | Secret | The SSH user's sudo password (`ansible_become_password`); must track the target's real password. |
 | `TS_AUTHKEY` | Secret | Reused to join the target to the tailnet. |
 | `GITEA_RUNNER_IMAGE` / `_NAME` / `_DATA_PATH` | Variable | Optional overrides (see role defaults). |
 
