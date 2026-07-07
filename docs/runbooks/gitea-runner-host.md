@@ -25,12 +25,20 @@ runner target are **different machines**, connected over SSH.
    > `NOPASSWD` or by removing the become-password wiring — that exact
    > flip-flop already happened once (#139 reverted #138 based on an earlier
    > revision of this section, and had to be re-fixed by #143). Decode the
-   > two failures instead:
+   > failures instead:
    >   * `Missing sudo password` — the `ansible_become_password` wiring is
    >     absent from the inventory line (regression of #143).
-   >   * `Incorrect sudo password` — the `GITEA_RUNNER_SUDO_PASSWORD`
-   >     secret's value does not match the target user's actual password;
-   >     update the secret (`gh secret set GITEA_RUNNER_SUDO_PASSWORD`).
+   >   * `Incorrect sudo password` — **check reachability FIRST, the message
+   >     lies.** With `pipelining = True` + become, Ansible misreports a
+   >     host that is unresolvable/unreachable from inside the job container
+   >     as a sudo-password rejection (proven 2026-07-07: tcpdump on the
+   >     controller showed Play 2 opened ZERO SSH connections while Ansible
+   >     claimed `Incorrect sudo password` — `GITEA_RUNNER_HOST` pointed at a
+   >     long-offline host, and the container's LAN DNS returned NXDOMAIN
+   >     for it). Only after confirming the target actually accepts SSH does
+   >     this message mean the `GITEA_RUNNER_SUDO_PASSWORD` secret's value
+   >     doesn't match the target user's password
+   >     (`gh secret set GITEA_RUNNER_SUDO_PASSWORD`).
 2. Reachable **before** it is on the tailnet (the seed joins the tailnet),
    so `GITEA_RUNNER_HOST` must be LAN-resolvable at seed time.
 3. A systemd Linux host where Docker can be installed.
