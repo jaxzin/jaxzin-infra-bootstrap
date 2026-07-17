@@ -255,14 +255,13 @@ this doc is conditional on it.
 5. **Timeline/urgency.** This is the fleet's tier-1, DR-Wave-1 service. Recommend treating
    "rehearse a full restore onto the new cluster before any real cutover" (§7 Phase 2) as
    non-negotiable regardless of how much schedule pressure exists.
-6. **Aside, not blocking the migration decision:** `autoheal` (`willfarrell/autoheal`) is
-   running live on the NAS today but isn't deployed by this repo's Ansible — it predates or
-   sits outside this repo's IaC. That's a standing violation of this homelab's own
-   "no manual/unmanaged infrastructure" convention, and it's part of the very restart-loop
-   problem class this migration exists to get away from (it's what actually executed the
-   sidecar restarts in the #148 and 2026-07-17 incidents). Worth a decision independent of
-   the Kubernetes timeline: adopt it into IaC, or retire it outright once the netns-sharing
-   pattern it keeps tripping over is gone.
+6. ~~**Aside, not blocking the migration decision:** `autoheal`~~ **RESOLVED 2026-07-17
+   (operator decision): retired.** `autoheal` was an unmanaged container (never in this
+   repo's IaC) and the executor of the restart-loops in the #148 incidents. Removed live
+   from the NAS and enforced as IaC: `stack_reconcile` carries an `autoheal → state:
+   absent` task, regression-locked by Check N in `tests/check_docker_tasks.py` (PR #154).
+   Operator-accepted trade-off: `openbao`/`influxdb` (labeled `autoheal=true`, owned by
+   other stacks) lose restart-on-unhealthy — their healing belongs to their owning repos.
 
 ## 7. Recommended phasing (once §6 is answered)
 
