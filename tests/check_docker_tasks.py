@@ -227,8 +227,14 @@ def check_file(filepath, errors, warnings):
                         f"but also has '{clean_key}' (incompatible)"
                     )
 
-        # Check C: standalone tasks should have networks
-        if not has_container_network_mode(block):
+        # Check C: standalone tasks should have networks. Removal tasks
+        # (state: absent) are exempt — they never create a container, so
+        # network config is meaningless on them (e.g. the autoheal retire
+        # task, check N).
+        is_absent = any(
+            re.match(r'^\s*state:\s*absent\s*$', line) for line in block
+        )
+        if not has_container_network_mode(block) and not is_absent:
             if not has_key_in_block(block, "networks"):
                 # Only warn if it's not using network_mode at all
                 has_any_network_mode = any("network_mode:" in line for line in block)
@@ -835,6 +841,66 @@ def check_m_netns_reconcile(errors):
                 )
 
 
+def check_n_autoheal_retired(errors):
+    """Check N: autoheal stays retired (state: absent), never redeployed.
+
+    autoheal (willfarrell/autoheal) was an UNMANAGED container on the NAS —
+    never deployed by this repo's IaC — whose context-free
+    restart-on-unhealthy amplified dns-watchdog blips into full outages by
+    restart-looping the tailscale-gitea sidecar and stranding gitea in a
+    dead netns (#148, 2026-07-05/06). stack_reconcile is the setup-aware
+    replacement. The retirement is itself IaC: a `state: absent` task in
+    stack_reconcile. This check locks BOTH directions:
+      1. the absent-task exists (removal stays enforced on every deploy);
+      2. no role reintroduces an autoheal container with state != absent.
+    """
+    try:
+        with open(STACK_RECONCILE_TASKS) as fh:
+            tasks_text = fh.read()
+    except FileNotFoundError:
+        errors.append(f"{STACK_RECONCILE_TASKS}: File not found")
+        return
+
+    # 1. the retire task exists: a docker_container block naming autoheal
+    #    with state: absent.
+    blocks = split_into_task_blocks(open(STACK_RECONCILE_TASKS).readlines())
+    retire_found = False
+    for block in blocks:
+        text = "".join(block)
+        if "docker_container" not in text:
+            continue
+        if re.search(r'^\s*name:\s*["\']?autoheal["\']?\s*$', text, re.MULTILINE):
+            if re.search(r'^\s*state:\s*absent\s*$', text, re.MULTILINE):
+                retire_found = True
+            else:
+                errors.append(
+                    f"{STACK_RECONCILE_TASKS}: an autoheal docker_container "
+                    f"task exists WITHOUT state: absent — autoheal is retired "
+                    f"(its blind restart-on-unhealthy caused #148); it must "
+                    f"only ever appear as state: absent."
+                )
+    if not retire_found:
+        errors.append(
+            f"{STACK_RECONCILE_TASKS}: missing the 'autoheal state: absent' "
+            f"retire task — without it a hand-run autoheal container "
+            f"resurrected on the NAS would never be removed by deploys, and "
+            f"its context-free restarts re-create the #148 outage class."
+        )
+
+    # 2. no OTHER role deploys an autoheal container at all.
+    for path in glob.glob(f"{ROLES_DIR}/*/tasks/main.yml"):
+        if path == STACK_RECONCILE_TASKS:
+            continue
+        with open(path) as fh:
+            text = fh.read()
+        if re.search(r'^\s*name:\s*["\']?autoheal["\']?\s*$', text, re.MULTILINE) \
+                and "docker_container" in text:
+            errors.append(
+                f"{path}: defines an autoheal container — autoheal is retired; "
+                f"stack_reconcile owns healing (see its retire task + #148)."
+            )
+
+
 def main():
     errors = []
     warnings = []
@@ -881,6 +947,10 @@ def main():
     # Run check M: the netns reconcile (#148) is plumbed end-to-end
     # (script step + watchdog env + cron wrapper set/export)
     check_m_netns_reconcile(errors)
+
+    # Run check N: autoheal stays retired (absent-task present, no role
+    # reintroduces it)
+    check_n_autoheal_retired(errors)
 
     # Report results
     for w in warnings:
