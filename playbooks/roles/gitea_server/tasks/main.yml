@@ -65,6 +65,19 @@
     # live `docker update` applied during the incident.
     memory: "1024m"
     memory_swap: "2048m"
+    # InnoDB tuning sized for the 1g cap and this workload (2026-07-18
+    # incident follow-up; applied live via SET PERSIST during the incident,
+    # codified here and then RESET PERSIST'd so this file is the single
+    # source — mysqld-auto.cnf would otherwise OVERRIDE these flags):
+    #   buffer pool 512M (default 128M): the actions/dbfs working set
+    #   measurably thrashed the default under concurrent CI log streaming.
+    #   flush_log_at_trx_commit=2 (default 1): skip the per-COMMIT fsync on
+    #   the busy spinning volume; accepts a <=1s committed-txn loss window on
+    #   an OS crash — acceptable for CI/repo metadata (git object data does
+    #   not live in MySQL).
+    command:
+      - "--innodb-buffer-pool-size=512M"
+      - "--innodb-flush-log-at-trx-commit=2"
     networks:
       - name: "{{ gitea_network_name }}"
     env:
