@@ -21,10 +21,20 @@
     enabled: true
     state: started
 
+# apt, not the generic package module: we need update_cache. A stale apt
+# cache on a long-idle host pins package versions that Debian's archive has
+# since superseded (point releases delete the old .debs), and the install
+# 404s — seen 2026-07-18: cache from June pointed at python3.11 deb12u7
+# which no longer existed upstream. cache_valid_time keeps repeat deploys
+# from hammering the mirrors. (This role's supported targets are already
+# Debian/Ubuntu only — see the --break-system-packages note below — so the
+# apt module loses no generality the role actually had.)
 - name: Ensure pip3 is present (for the Docker SDK)
-  ansible.builtin.package:
+  ansible.builtin.apt:
     name: python3-pip
     state: present
+    update_cache: true
+    cache_valid_time: 3600
 
 - name: Ensure the Docker SDK for Python is installed (community.docker needs it)
   # community.docker.docker_container runs ON this target over SSH, so the
