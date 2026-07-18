@@ -5,6 +5,23 @@
 # (templated with no_log: true), never on the cron line or in the container
 # env:. Best-effort throughout — Gitea is tier-1 / DR-first.
 
+# RETIRED: autoheal (willfarrell/autoheal). It was never deployed by this
+# repo's IaC (an unmanaged hand-run container — itself a violation of the
+# no-unmanaged-infra rule), and its context-free restart-on-unhealthy is what
+# amplified the 2026-07-05/06 dns-watchdog blips into full outages: it
+# restart-looped the tailscale-gitea sidecar, stranding gitea in a dead netns
+# (#148) while every container reported "healthy". stack_reconcile is the
+# setup-aware replacement (dependency-ordered revival, health-gated restarts,
+# netns-stranding reconcile), so autoheal's job here is gone. Deliberate,
+# operator-approved trade-off (2026-07-17): containers OUTSIDE the gitea
+# stack that carried autoheal=true labels (openbao, influxdb) lose
+# restart-on-unhealthy with its removal — their owning repos add their own
+# healing if wanted; this repo only owns the gitea stack's.
+- name: "Retire: ensure the legacy autoheal container is absent"
+  community.docker.docker_container:
+    name: autoheal
+    state: absent
+
 - name: Ensure scripts, logs, and lock directories exist
   ansible.builtin.file:
     path: "{{ item }}"

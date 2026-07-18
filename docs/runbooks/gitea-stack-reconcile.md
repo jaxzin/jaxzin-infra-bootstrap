@@ -49,6 +49,22 @@ If an orphan still occurs (e.g. before the one-time live-restore enablement
 completes, or some other path stops a container), the reconcile watchdog brings
 the stack back within minutes.
 
+### Retired: autoheal (do not bring it back)
+
+`willfarrell/autoheal` used to run on the NAS as an **unmanaged** container
+(never deployed by this repo's IaC) blindly restarting anything unhealthy
+(`AUTOHEAL_CONTAINER_LABEL=all`). Its context-free restarts are what amplified
+the 2026-07-05/06 dns-watchdog blips into full outages: it restart-looped the
+`tailscale-gitea` sidecar and stranded `gitea` in a dead netns (#148).
+`stack_reconcile` is the setup-aware replacement, and the retirement is
+enforced as IaC: `stack_reconcile` carries an `autoheal → state: absent` task
+so any hand-resurrected copy is removed on every deploy, and
+`tests/check_docker_tasks.py` **Check N** locks both the retire task's
+existence and that no role ever reintroduces the container. Known,
+operator-accepted trade-off (2026-07-17): non-Gitea containers that carried
+`autoheal=true` labels (`openbao`, `influxdb`) lost restart-on-unhealthy —
+healing for those belongs to their owning repos, not this one.
+
 ## How `stack_reconcile` works
 
 The same host-neutral reconcile script (`stack_reconcile.sh`) runs in **two
