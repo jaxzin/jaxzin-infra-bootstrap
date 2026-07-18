@@ -116,10 +116,23 @@ jobs:
         with:
           playbook: gitea-deploy.yml
           directory: ./playbooks
+          # Only pipelining here — do NOT hand-roll ssh_args/ControlPath.
+          # The previous `ControlPath=/tmp/ansible-ssh-%%h-%%p-%%r` reached
+          # the ssh command line with the %% intact, which ssh collapses to
+          # the LITERAL static path /tmp/ansible-ssh-%h-%p-%r — ONE shared
+          # ControlMaster socket for every host. Play 1 created it connected
+          # to the NAS; Play 2 then silently multiplexed onto that same NAS
+          # connection no matter what GITEA_RUNNER_HOST said, and its become
+          # password failed against the wrong host as "Incorrect sudo
+          # password" (the #138/#139/#143 saga, and it also masqueraded as
+          # dead-host/unresolvable-host symptoms during diagnosis). Ansible's
+          # DEFAULT ssh_args already enable ControlMaster/ControlPersist with
+          # a per-host HASHED ControlPath (%C under ~/.ansible/cp), immune to
+          # percent-escaping at every layer. See
+          # docs/runbooks/gitea-runner-host.md ("Incorrect sudo password").
           configuration: |
             [ssh_connection]
             pipelining = True
-            ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o ControlPath=/tmp/ansible-ssh-%%h-%%p-%%r
           key: ${{ secrets.SSH_KEY }}
           inventory: |
             [nas]
