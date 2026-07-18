@@ -57,8 +57,14 @@
     log_options:
       max-size: "10m"
       max-file: "3"
-    memory: "512m"
-    memory_swap: "1024m"
+    # 1g (was 512m): Gitea Actions streams live job logs through dbfs, i.e.
+    # through THIS database. Under concurrent workflow load the 512m cap
+    # produced multi-second InnoDB COMMITs, starving runner heartbeats until
+    # Gitea's zombie reaper killed healthy jobs at the 10-minute mark
+    # (2026-07-18 incident; fleet-wide logless CI failures). Matches the
+    # live `docker update` applied during the incident.
+    memory: "1024m"
+    memory_swap: "2048m"
     networks:
       - name: "{{ gitea_network_name }}"
     env:
